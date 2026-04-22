@@ -45,7 +45,15 @@ const navTitle = {
   <body class="min-h-dvh">
     <header class="sticky top-0 z-30 border-b border-border/70 backdrop-blur-xl" style="background: color-mix(in srgb, var(--color-bg) 75%, transparent);">
       <div class="mx-auto flex max-w-3xl items-center gap-3 px-4 py-3">
-        {user && <SideNav client:load active={activeNav} userName={user.name} userEmail={user.email} />}
+        {user && (
+          <SideNav
+            client:load
+            transition:persist="sidenav"
+            active={activeNav}
+            userName={user.name}
+            userEmail={user.email}
+          />
+        )}
 
         <div class="flex min-w-0 flex-1 items-center gap-2">
           <a href="/" class="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-accent text-ink" aria-label="Ir a Hoy">

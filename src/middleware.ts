@@ -14,7 +14,6 @@ export const onRequest = defineMiddleware(async (ctx, next) => {
 
   if (isAuthApi || PUBLIC_PATHS.includes(path)) return next();
 
-  // Protect everything else. Redirect non-GET mutations with 401 so fetches fail fast.
   if (!ctx.locals.user) {
     if (ctx.request.method !== 'GET') {
       return new Response('Unauthorized', { status: 401 });
@@ -23,5 +22,22 @@ export const onRequest = defineMiddleware(async (ctx, next) => {
     return ctx.redirect(`/login?r=${redirect}`);
   }
 
-  return next();
+  const response = await next();
+
+  // Short-lived cache for authenticated GET pages so the browser (and the
+  // Vercel edge, with `private`) can replay navigations within ~10s. SWR
+  // keeps stale responses usable while the server revalidates in the bg.
+  if (
+    ctx.request.method === 'GET' &&
+    !path.startsWith('/api/') &&
+    response.status === 200 &&
+    !response.headers.has('Cache-Control')
+  ) {
+    response.headers.set(
+      'Cache-Control',
+      'private, max-age=10, stale-while-revalidate=60',
+    );
+  }
+
+  return response;
 });

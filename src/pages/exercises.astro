@@ -75,7 +75,7 @@ const showGroupsIndex = !isSearching && groupId === null;
     </>
   ) : (
     <ExerciseList
-      client:load
+      client:idle
       exercises={exercises}
       categories={categories}
       initialCategory={groupId ?? null}
