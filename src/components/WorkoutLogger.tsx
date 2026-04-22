@@ -55,55 +55,122 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
     return () => clearTimeout(t);
   }, [comment, commentDirty, date]);
 
-  // Re-fetch the day's sets so PR flags stay consistent when a new set takes
-  // over an existing record (old holder must lose its flag client-side too).
   async function refreshSets() {
     const res = await fetch(`/api/sets?date=${date}`);
     if (!res.ok) return;
-    const fresh = (await res.json()) as TrainingSet[];
-    setSets(fresh);
+    setSets((await res.json()) as TrainingSet[]);
+  }
+
+  function buildOptimisticSet(
+    exerciseId: number,
+    tempId: number,
+    patch: Partial<TrainingSet>,
+  ): TrainingSet {
+    const exercise = exercises.find((e) => e.id === exerciseId)!;
+    return {
+      id: tempId,
+      exercise_id: exerciseId,
+      exercise_name: exercise.name,
+      category_id: exercise.category_id,
+      category_color: exercise.category_color,
+      date,
+      weight_kg: 0,
+      reps: 0,
+      distance_m: 0,
+      duration_seconds: 0,
+      is_personal_record: 0,
+      position: 0,
+      ...patch,
+    };
+  }
+
+  async function postSet(
+    exerciseId: number,
+    tempId: number,
+    payload: Record<string, number>,
+  ) {
+    try {
+      const res = await fetch('/api/sets', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ exercise_id: exerciseId, date, ...payload }),
+      });
+      if (!res.ok) throw new Error('POST failed');
+      const data = await res.json();
+      const prChanged = data.pr_weight || data.pr_1rm || data.pr_reps;
+
+      if (prChanged) {
+        // A PR shifted — the previous holder lost its flag. Resync the day.
+        await refreshSets();
+      } else {
+        // Just swap the temp id for the real one.
+        setSets((prev) =>
+          prev.map((s) =>
+            s.id === tempId ? { ...s, id: data.id, position: data.position } : s,
+          ),
+        );
+      }
+    } catch {
+      // Roll back the optimistic append.
+      setSets((prev) => prev.filter((s) => s.id !== tempId));
+      alert('No se pudo guardar la serie. Revisa la conexión.');
+    }
   }
 
   async function addSet(exerciseId: number, weight: number, reps: number) {
-    const res = await fetch('/api/sets', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ exercise_id: exerciseId, date, weight_kg: weight, reps }),
-    });
-    if (!res.ok) return;
-    await refreshSets();
+    const tempId = -Date.now();
+    setSets((prev) => [...prev, buildOptimisticSet(exerciseId, tempId, { weight_kg: weight, reps })]);
+    await postSet(exerciseId, tempId, { weight_kg: weight, reps });
   }
 
   async function addCardioSet(exerciseId: number, durationSec: number, distanceM: number) {
-    const res = await fetch('/api/sets', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        exercise_id: exerciseId,
-        date,
-        weight_kg: 0,
-        reps: 0,
-        duration_seconds: durationSec,
-        distance_m: distanceM,
-      }),
+    const tempId = -Date.now();
+    setSets((prev) => [
+      ...prev,
+      buildOptimisticSet(exerciseId, tempId, { duration_seconds: durationSec, distance_m: distanceM }),
+    ]);
+    await postSet(exerciseId, tempId, {
+      weight_kg: 0,
+      reps: 0,
+      duration_seconds: durationSec,
+      distance_m: distanceM,
     });
-    if (!res.ok) return;
-    await refreshSets();
   }
 
   async function deleteSet(id: number) {
-    await fetch(`/api/sets/${id}`, { method: 'DELETE' });
-    await refreshSets();
+    const prev = sets;
+    const had = prev.find((s) => s.id === id);
+    setSets((cur) => cur.filter((s) => s.id !== id));
+    try {
+      const res = await fetch(`/api/sets/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('DELETE failed');
+      // If the deleted set held any PR, refetch so the runner-up picks it up.
+      if (had && (had.pr_weight || had.pr_1rm || had.pr_reps)) await refreshSets();
+    } catch {
+      setSets(prev);
+      alert('No se pudo borrar la serie.');
+    }
   }
 
-  async function updateSet(id: number, patch: Partial<Pick<TrainingSet, 'weight_kg' | 'reps' | 'duration_seconds' | 'distance_m'>>) {
-    const res = await fetch(`/api/sets/${id}`, {
-      method: 'PATCH',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(patch),
-    });
-    if (!res.ok) return;
-    await refreshSets();
+  async function updateSet(
+    id: number,
+    patch: Partial<Pick<TrainingSet, 'weight_kg' | 'reps' | 'duration_seconds' | 'distance_m'>>,
+  ) {
+    const prev = sets;
+    setSets((cur) => cur.map((s) => (s.id === id ? { ...s, ...patch } : s)));
+    try {
+      const res = await fetch(`/api/sets/${id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(patch),
+      });
+      if (!res.ok) throw new Error('PATCH failed');
+      // PR flags may have shifted on weight/reps edits.
+      if ('weight_kg' in patch || 'reps' in patch) await refreshSets();
+    } catch {
+      setSets(prev);
+      alert('No se pudo guardar el cambio.');
+    }
   }
 
   function selectExercise(id: number) {

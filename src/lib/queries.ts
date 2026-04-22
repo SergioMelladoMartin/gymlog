@@ -41,13 +41,35 @@ export interface DayPrCounts {
   pr_reps: number;
 }
 
+// ── Cache layer ──────────────────────────────────────────────────────────
+// Module-level memo. On warm lambdas this cuts roundtrips to Turso to near-zero
+// for reads of data that rarely changes (categories, exercise catalogue).
+// Invalidation happens on writes that affect the cached shape.
+
+const CATEGORY_TTL_MS = 10 * 60_000;
+const EXERCISES_TTL_MS = 60_000;
+
+let categoriesCache: { data: Category[]; expires: number } | null = null;
+const exercisesCache = new Map<string, { data: Exercise[]; expires: number }>();
+
+export function invalidateExercisesCache(userId: string) {
+  exercisesCache.delete(userId);
+}
+
 // Categories are global (shared by every user).
 export async function getCategories(): Promise<Category[]> {
+  const now = Date.now();
+  if (categoriesCache && categoriesCache.expires > now) return categoriesCache.data;
   const res = await db.execute('SELECT id, name, color, sort_order FROM category ORDER BY sort_order, name');
-  return res.rows as unknown as Category[];
+  const data = res.rows as unknown as Category[];
+  categoriesCache = { data, expires: now + CATEGORY_TTL_MS };
+  return data;
 }
 
 export async function getExercises(userId: string): Promise<Exercise[]> {
+  const now = Date.now();
+  const cached = exercisesCache.get(userId);
+  if (cached && cached.expires > now) return cached.data;
   const res = await db.execute({
     sql: `
       SELECT e.id, e.name, e.category_id, c.name AS category_name, c.color AS category_color,
@@ -60,7 +82,9 @@ export async function getExercises(userId: string): Promise<Exercise[]> {
     `,
     args: [userId, userId],
   });
-  return res.rows as unknown as Exercise[];
+  const data = res.rows as unknown as Exercise[];
+  exercisesCache.set(userId, { data, expires: now + EXERCISES_TTL_MS });
+  return data;
 }
 
 /**

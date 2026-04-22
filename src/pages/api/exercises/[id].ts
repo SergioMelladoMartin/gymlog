@@ -1,5 +1,6 @@
 import type { APIRoute } from 'astro';
 import { db } from '../../../lib/db';
+import { invalidateExercisesCache } from '../../../lib/queries';
 
 export const prerender = false;
 
@@ -44,5 +45,6 @@ export const PATCH: APIRoute = async ({ params, request, locals }) => {
     args,
   });
   if (!res.rowsAffected) return new Response('not found', { status: 404 });
+  invalidateExercisesCache(userId);
   return new Response(null, { status: 204 });
 };

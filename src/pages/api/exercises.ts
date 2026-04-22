@@ -1,6 +1,6 @@
 import type { APIRoute } from 'astro';
 import { db } from '../../lib/db';
-import { getExercises } from '../../lib/queries';
+import { getExercises, invalidateExercisesCache } from '../../lib/queries';
 
 export const prerender = false;
 
@@ -37,6 +37,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     args: [userId, name, category_id],
   });
   const id = res.rows[0]?.id as number;
+  invalidateExercisesCache(userId);
 
   const row = await db.execute({
     sql: `SELECT e.id, e.name, e.category_id, c.name AS category_name, c.color AS category_color,

@@ -1,5 +1,6 @@
 import type { APIRoute } from 'astro';
 import { db } from '../../../lib/db';
+import { invalidateExercisesCache } from '../../../lib/queries';
 
 export const prerender = false;
 
@@ -25,6 +26,7 @@ export const PATCH: APIRoute = async ({ params, request, locals }) => {
     args,
   });
   if (!res.rowsAffected) return new Response('not found', { status: 404 });
+  invalidateExercisesCache(locals.user.id);
   return new Response(null, { status: 204 });
 };
 
@@ -37,5 +39,6 @@ export const DELETE: APIRoute = async ({ params, locals }) => {
     args: [id, locals.user.id],
   });
   if (!res.rowsAffected) return new Response('not found', { status: 404 });
+  invalidateExercisesCache(locals.user.id);
   return new Response(null, { status: 204 });
 };
