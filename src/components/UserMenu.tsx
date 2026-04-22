@@ -28,8 +28,15 @@ export default function UserMenu({ userName, userEmail }: Props) {
   }
 
   async function logout() {
-    await fetch('/api/auth/sign-out', { method: 'POST' });
-    window.location.href = '/login';
+    // Better-Auth parses the body as JSON — send an empty object, not nothing.
+    try {
+      await fetch('/api/auth/sign-out', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}',
+      });
+    } catch {}
+    window.location.replace('/login');
   }
 
   const initial = (userName || userEmail || '?').trim().charAt(0).toUpperCase();
