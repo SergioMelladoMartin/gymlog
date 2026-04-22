@@ -5,13 +5,12 @@ import { getDayPrCounts } from '../lib/queries';
 
 export const prerender = false;
 
+const user = Astro.locals.user!;
 const url = Astro.url;
 const limit = 30;
-const before = url.searchParams.get('before'); // fetch days older than this (YYYY-MM-DD)
-const after = url.searchParams.get('after');   // fetch days newer than this (YYYY-MM-DD)
+const before = url.searchParams.get('before');
+const after = url.searchParams.get('after');
 
-// Each page loads `limit` days in reverse-chronological order.
-// `before` jumps older, `after` returns to newer pages.
 const res = before
   ? await db.execute({
       sql: `SELECT date,
@@ -19,11 +18,9 @@ const res = before
                    COUNT(*) AS set_count,
                    SUM(weight_kg * reps) AS volume
             FROM training_set
-            WHERE date < ?
-            GROUP BY date
-            ORDER BY date DESC
-            LIMIT ?`,
-      args: [before, limit],
+            WHERE user_id = ? AND date < ?
+            GROUP BY date ORDER BY date DESC LIMIT ?`,
+      args: [user.id, before, limit],
     })
   : after
   ? await db.execute({
@@ -33,13 +30,10 @@ const res = before
                      COUNT(*) AS set_count,
                      SUM(weight_kg * reps) AS volume
               FROM training_set
-              WHERE date > ?
-              GROUP BY date
-              ORDER BY date ASC
-              LIMIT ?
-            ) sub
-            ORDER BY date DESC`,
-      args: [after, limit],
+              WHERE user_id = ? AND date > ?
+              GROUP BY date ORDER BY date ASC LIMIT ?
+            ) sub ORDER BY date DESC`,
+      args: [user.id, after, limit],
     })
   : await db.execute({
       sql: `SELECT date,
@@ -47,10 +41,9 @@ const res = before
                    COUNT(*) AS set_count,
                    SUM(weight_kg * reps) AS volume
             FROM training_set
-            GROUP BY date
-            ORDER BY date DESC
-            LIMIT ?`,
-      args: [limit],
+            WHERE user_id = ?
+            GROUP BY date ORDER BY date DESC LIMIT ?`,
+      args: [user.id, limit],
     });
 
 const days = res.rows as unknown as Array<{
@@ -68,11 +61,11 @@ const breakdownRes = days.length
         FROM training_set ts
         JOIN exercise e ON e.id = ts.exercise_id
         JOIN category c ON c.id = e.category_id
-        WHERE ts.date IN (${days.map(() => '?').join(',')})
+        WHERE ts.user_id = ? AND ts.date IN (${days.map(() => '?').join(',')})
         GROUP BY ts.date, ts.exercise_id
         ORDER BY ts.date DESC, MIN(ts.id) ASC
       `,
-      args: days.map((d) => d.date),
+      args: [user.id, ...days.map((d) => d.date)],
     })
   : { rows: [] as any[] };
 
@@ -84,8 +77,9 @@ for (const row of breakdownRes.rows as unknown as Array<{ date: string; exercise
 
 const commentsRes = days.length
   ? await db.execute({
-      sql: `SELECT date, body FROM workout_comment WHERE date IN (${days.map(() => '?').join(',')})`,
-      args: days.map((d) => d.date),
+      sql: `SELECT date, body FROM workout_comment
+            WHERE user_id = ? AND date IN (${days.map(() => '?').join(',')})`,
+      args: [user.id, ...days.map((d) => d.date)],
     })
   : { rows: [] as any[] };
 const comments = new Map<string, string>();
@@ -93,7 +87,7 @@ for (const row of commentsRes.rows as unknown as Array<{ date: string; body: str
   comments.set(row.date, row.body);
 }
 
-const prsByDate = await getDayPrCounts(days.map((d) => d.date));
+const prsByDate = await getDayPrCounts(user.id, days.map((d) => d.date));
 
 const formatDate = (iso: string) => {
   const d = new Date(iso + 'T00:00:00');
@@ -113,15 +107,15 @@ const paged = !!(before || after);
 let hasOlder = false, hasNewer = false;
 if (oldestDate) {
   const r = await db.execute({
-    sql: 'SELECT EXISTS(SELECT 1 FROM training_set WHERE date < ?) AS has',
-    args: [oldestDate],
+    sql: 'SELECT EXISTS(SELECT 1 FROM training_set WHERE user_id = ? AND date < ?) AS has',
+    args: [user.id, oldestDate],
   });
   hasOlder = !!r.rows[0]?.has;
 }
 if (newestDate && paged) {
   const r = await db.execute({
-    sql: 'SELECT EXISTS(SELECT 1 FROM training_set WHERE date > ?) AS has',
-    args: [newestDate],
+    sql: 'SELECT EXISTS(SELECT 1 FROM training_set WHERE user_id = ? AND date > ?) AS has',
+    args: [user.id, newestDate],
   });
   hasNewer = !!r.rows[0]?.has;
 }

@@ -4,17 +4,18 @@ import { renderShareCardPng } from '../../../../lib/share-card';
 
 export const prerender = false;
 
-export const GET: APIRoute = async ({ params }) => {
+export const GET: APIRoute = async ({ params, locals }) => {
+  if (!locals.user) return new Response('Unauthorized', { status: 401 });
   const date = params.date;
   if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     return new Response('invalid date', { status: 400 });
   }
 
-  const sets = await getSetsForDate(date);
+  const sets = await getSetsForDate(locals.user.id, date);
   if (!sets.length) {
     return new Response('No hay entrenamiento ese día', { status: 404 });
   }
-  const comment = await getWorkoutComment(date);
+  const comment = await getWorkoutComment(locals.user.id, date);
 
   const groupMap = new Map<number, { name: string; category_color: string | null; sets: typeof sets }>();
   for (const s of sets) {

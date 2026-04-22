@@ -3,7 +3,9 @@ import { db } from '../../../lib/db';
 
 export const prerender = false;
 
-export const PATCH: APIRoute = async ({ params, request }) => {
+export const PATCH: APIRoute = async ({ params, request, locals }) => {
+  if (!locals.user) return new Response('Unauthorized', { status: 401 });
+  const userId = locals.user.id;
   const id = Number(params.id);
   if (!id) return new Response('id required', { status: 400 });
 
@@ -16,8 +18,8 @@ export const PATCH: APIRoute = async ({ params, request }) => {
     if (!name) return new Response('name empty', { status: 400 });
     if (name.length > 80) return new Response('name too long', { status: 400 });
     const exists = await db.execute({
-      sql: 'SELECT id FROM exercise WHERE LOWER(name) = LOWER(?) AND id != ? LIMIT 1',
-      args: [name, id],
+      sql: 'SELECT id FROM exercise WHERE user_id = ? AND LOWER(name) = LOWER(?) AND id != ? LIMIT 1',
+      args: [userId, name, id],
     });
     if (exists.rows[0]) {
       return new Response(JSON.stringify({ error: 'Ya existe otro ejercicio con ese nombre' }), {
@@ -35,8 +37,12 @@ export const PATCH: APIRoute = async ({ params, request }) => {
   }
 
   if (!fields.length) return new Response('no fields', { status: 400 });
-  args.push(id);
+  args.push(id, userId);
 
-  await db.execute({ sql: `UPDATE exercise SET ${fields.join(', ')} WHERE id = ?`, args });
+  const res = await db.execute({
+    sql: `UPDATE exercise SET ${fields.join(', ')} WHERE id = ? AND user_id = ?`,
+    args,
+  });
+  if (!res.rowsAffected) return new Response('not found', { status: 404 });
   return new Response(null, { status: 204 });
 };

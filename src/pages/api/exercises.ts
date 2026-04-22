@@ -4,12 +4,15 @@ import { getExercises } from '../../lib/queries';
 
 export const prerender = false;
 
-export const GET: APIRoute = async () => {
-  const exercises = await getExercises();
+export const GET: APIRoute = async ({ locals }) => {
+  if (!locals.user) return new Response('Unauthorized', { status: 401 });
+  const exercises = await getExercises(locals.user.id);
   return Response.json(exercises);
 };
 
-export const POST: APIRoute = async ({ request }) => {
+export const POST: APIRoute = async ({ request, locals }) => {
+  if (!locals.user) return new Response('Unauthorized', { status: 401 });
+  const userId = locals.user.id;
   const body = await request.json();
   const name = (body.name as string | undefined)?.trim();
   const category_id = Number(body.category_id);
@@ -19,8 +22,8 @@ export const POST: APIRoute = async ({ request }) => {
   if (name.length > 80) return new Response('name too long', { status: 400 });
 
   const exists = await db.execute({
-    sql: 'SELECT id FROM exercise WHERE LOWER(name) = LOWER(?) LIMIT 1',
-    args: [name],
+    sql: 'SELECT id FROM exercise WHERE user_id = ? AND LOWER(name) = LOWER(?) LIMIT 1',
+    args: [userId, name],
   });
   if (exists.rows[0]) {
     return new Response(JSON.stringify({ error: 'Ya existe un ejercicio con ese nombre' }), {
@@ -30,10 +33,8 @@ export const POST: APIRoute = async ({ request }) => {
   }
 
   const res = await db.execute({
-    sql: `INSERT INTO exercise (name, category_id, is_favorite)
-          VALUES (?, ?, 0)
-          RETURNING id`,
-    args: [name, category_id],
+    sql: 'INSERT INTO exercise (user_id, name, category_id, is_favorite) VALUES (?, ?, ?, 0) RETURNING id',
+    args: [userId, name, category_id],
   });
   const id = res.rows[0]?.id as number;
 

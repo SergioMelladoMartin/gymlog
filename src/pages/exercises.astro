@@ -5,7 +5,8 @@ import { getExercises, getCategories } from '../lib/queries';
 
 export const prerender = false;
 
-const [exercises, categories] = await Promise.all([getExercises(), getCategories()]);
+const user = Astro.locals.user!;
+const [exercises, categories] = await Promise.all([getExercises(user.id), getCategories()]);
 ---
 <Layout title="Ejercicios · gymlog" activeNav="exercises">
   <div class="mb-5">

@@ -40,7 +40,11 @@ function rangeFilter() {
   }
 }
 
+const user = Astro.locals.user!;
 const filter = rangeFilter();
+const userWhere = filter.where ? `${filter.where} AND user_id = ?` : 'WHERE user_id = ?';
+const userWhereTs = filter.whereTs ? `${filter.whereTs} AND ts.user_id = ?` : 'WHERE ts.user_id = ?';
+const args = [...filter.args, user.id];
 
 const totalsRes = await db.execute({
   sql: `SELECT COUNT(*)                       AS total_sets,
@@ -49,8 +53,8 @@ const totalsRes = await db.execute({
                SUM(weight_kg * reps)          AS total_volume,
                MIN(date)                      AS first_day,
                MAX(date)                      AS last_day
-        FROM training_set ${filter.where}`,
-  args: filter.args,
+        FROM training_set ${userWhere}`,
+  args,
 });
 const totals = totalsRes.rows[0] as unknown as {
   total_sets: number; total_days: number; total_exercises: number; total_volume: number;
@@ -65,10 +69,10 @@ const perCategoryRes = await db.execute({
         FROM training_set ts
         JOIN exercise e ON e.id = ts.exercise_id
         JOIN category c ON c.id = e.category_id
-        ${filter.whereTs}
+        ${userWhereTs}
         GROUP BY c.id
         ORDER BY volume DESC`,
-  args: filter.args,
+  args,
 });
 const perCategory = perCategoryRes.rows as unknown as Array<{
   id: number; name: string; color: string | null; set_count: number; volume: number; day_count: number;
@@ -80,11 +84,11 @@ const topExercisesRes = await db.execute({
         FROM training_set ts
         JOIN exercise e ON e.id = ts.exercise_id
         JOIN category c ON c.id = e.category_id
-        ${filter.whereTs}
+        ${userWhereTs}
         GROUP BY e.id
         ORDER BY set_count DESC
         LIMIT 10`,
-  args: filter.args,
+  args,
 });
 const topExercises = topExercisesRes.rows as unknown as Array<{
   id: number; name: string; color: string | null; set_count: number;
@@ -93,9 +97,9 @@ const topExercises = topExercisesRes.rows as unknown as Array<{
 // Weekly distribution across selected range
 const weekdayRes = await db.execute({
   sql: `SELECT CAST(strftime('%w', date) AS INTEGER) AS dow, COUNT(DISTINCT date) AS c
-        FROM training_set ${filter.where}
+        FROM training_set ${userWhere}
         GROUP BY dow`,
-  args: filter.args,
+  args,
 });
 const weekdayMap = new Map<number, number>();
 for (const row of weekdayRes.rows as unknown as Array<{ dow: number; c: number }>) {

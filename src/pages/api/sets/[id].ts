@@ -3,7 +3,8 @@ import { db } from '../../../lib/db';
 
 export const prerender = false;
 
-export const PATCH: APIRoute = async ({ params, request }) => {
+export const PATCH: APIRoute = async ({ params, request, locals }) => {
+  if (!locals.user) return new Response('Unauthorized', { status: 401 });
   const id = Number(params.id);
   if (!id) return new Response('id required', { status: 400 });
 
@@ -17,18 +18,24 @@ export const PATCH: APIRoute = async ({ params, request }) => {
     }
   }
   if (!fields.length) return new Response('no fields', { status: 400 });
-  args.push(id);
+  args.push(id, locals.user.id);
 
-  await db.execute({
-    sql: `UPDATE training_set SET ${fields.join(', ')} WHERE id = ?`,
+  const res = await db.execute({
+    sql: `UPDATE training_set SET ${fields.join(', ')} WHERE id = ? AND user_id = ?`,
     args,
   });
+  if (!res.rowsAffected) return new Response('not found', { status: 404 });
   return new Response(null, { status: 204 });
 };
 
-export const DELETE: APIRoute = async ({ params }) => {
+export const DELETE: APIRoute = async ({ params, locals }) => {
+  if (!locals.user) return new Response('Unauthorized', { status: 401 });
   const id = Number(params.id);
   if (!id) return new Response('id required', { status: 400 });
-  await db.execute({ sql: 'DELETE FROM training_set WHERE id = ?', args: [id] });
+  const res = await db.execute({
+    sql: 'DELETE FROM training_set WHERE id = ? AND user_id = ?',
+    args: [id, locals.user.id],
+  });
+  if (!res.rowsAffected) return new Response('not found', { status: 404 });
   return new Response(null, { status: 204 });
 };

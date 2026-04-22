@@ -11,14 +11,15 @@ import {
 
 export const prerender = false;
 
+const user = Astro.locals.user!;
 const id = Number(Astro.params.id);
 if (!id) return Astro.redirect('/exercises');
-const exercise = await getExerciseById(id);
+const exercise = await getExerciseById(user.id, id);
 if (!exercise) return Astro.redirect('/exercises');
 
 const [sessions, history, categories] = await Promise.all([
-  getExerciseSessionStats(id),
-  getExerciseSetsHistory(id, 200),
+  getExerciseSessionStats(user.id, id),
+  getExerciseSetsHistory(user.id, id, 200),
   getCategories(),
 ]);
 

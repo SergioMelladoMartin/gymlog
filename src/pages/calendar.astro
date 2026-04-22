@@ -23,9 +23,10 @@ if (view === 'year') {
   rangeTo = `${year}-${pad(month)}-${pad(last.getDate())}`;
 }
 
-const days = await getTrainingDaysInRange(rangeFrom, rangeTo);
+const user = Astro.locals.user!;
+const days = await getTrainingDaysInRange(user.id, rangeFrom, rangeTo);
 const byDate = new Map(days.map((d) => [d.date, d]));
-const prsByDate = await getDayPrCounts(days.map((d) => d.date));
+const prsByDate = await getDayPrCounts(user.id, days.map((d) => d.date));
 
 const totalDays = days.length;
 const totalSets = days.reduce((acc, d) => acc + d.set_count, 0);

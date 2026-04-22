@@ -12,12 +12,13 @@ import {
 
 export const prerender = false;
 
+const user = Astro.locals.user!;
 const date = todayISO();
 const [categories, exercises, sets, comment] = await Promise.all([
   getCategories(),
-  getExercises(),
-  getSetsForDate(date),
-  getWorkoutComment(date),
+  getExercises(user.id),
+  getSetsForDate(user.id, date),
+  getWorkoutComment(user.id, date),
 ]);
 
 const totalVol = sets.reduce((acc, s) => acc + s.weight_kg * s.reps, 0);

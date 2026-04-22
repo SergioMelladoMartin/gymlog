@@ -41,57 +41,63 @@ export interface DayPrCounts {
   pr_reps: number;
 }
 
+// Categories are global (shared by every user).
 export async function getCategories(): Promise<Category[]> {
   const res = await db.execute('SELECT id, name, color, sort_order FROM category ORDER BY sort_order, name');
   return res.rows as unknown as Category[];
 }
 
-export async function getExercises(): Promise<Exercise[]> {
-  const res = await db.execute(`
-    SELECT e.id, e.name, e.category_id, c.name AS category_name, c.color AS category_color,
-           e.is_favorite,
-           (SELECT MAX(date) FROM training_set WHERE exercise_id = e.id) AS last_used
-    FROM exercise e
-    JOIN category c ON c.id = e.category_id
-    ORDER BY c.sort_order, e.name
-  `);
+export async function getExercises(userId: string): Promise<Exercise[]> {
+  const res = await db.execute({
+    sql: `
+      SELECT e.id, e.name, e.category_id, c.name AS category_name, c.color AS category_color,
+             e.is_favorite,
+             (SELECT MAX(date) FROM training_set WHERE exercise_id = e.id AND user_id = ?) AS last_used
+      FROM exercise e
+      JOIN category c ON c.id = e.category_id
+      WHERE e.user_id = ?
+      ORDER BY c.sort_order, e.name
+    `,
+    args: [userId, userId],
+  });
   return res.rows as unknown as Exercise[];
 }
 
 /**
- * Shared CTEs resolving the current holder of each PR category:
- *   - pr_w_id   : heaviest weight ever for that exercise (1 set)
- *   - pr_1rm_id : best estimated 1RM (1 set)
- *   - pr_reps   : per exercise+weight bucket, the set with the highest reps.
- *                 Multiple sets can hold this badge (one per weight used).
- * Ties always break on earliest id — the set that first reached the mark keeps it.
+ * Shared CTEs resolving the current holder of each PR category *within a user's data*.
  */
-const PR_HOLDERS_CTE = `
+const prHoldersCte = (userId: string) => `
   WITH pr_holders AS (
     SELECT e.id AS exercise_id,
       (SELECT id FROM training_set
-       WHERE exercise_id = e.id
+       WHERE exercise_id = e.id AND user_id = '${userId}'
        ORDER BY weight_kg DESC, id ASC LIMIT 1) AS pr_w_id,
       (SELECT id FROM training_set
-       WHERE exercise_id = e.id
+       WHERE exercise_id = e.id AND user_id = '${userId}'
        ORDER BY (weight_kg * (1.0 + reps / 30.0)) DESC, id ASC LIMIT 1) AS pr_1rm_id
-    FROM exercise e
+    FROM exercise e WHERE e.user_id = '${userId}'
   ),
   pr_reps_holders AS (
     SELECT id, exercise_id
     FROM (
       SELECT id, exercise_id, weight_kg, reps,
              ROW_NUMBER() OVER (PARTITION BY exercise_id, weight_kg ORDER BY reps DESC, id ASC) AS rn
-      FROM training_set
+      FROM training_set WHERE user_id = '${userId}'
     ) t
     WHERE rn = 1
   )
 `;
 
-export async function getSetsForDate(date: string): Promise<TrainingSet[]> {
+// Quick sanity check to avoid injection via userId. User ids are ULID/UUID-like.
+function assertSafeUserId(userId: string) {
+  if (!/^[A-Za-z0-9_-]+$/.test(userId)) throw new Error('invalid user id');
+}
+
+export async function getSetsForDate(userId: string, date: string): Promise<TrainingSet[]> {
+  assertSafeUserId(userId);
   const res = await db.execute({
     sql: `
-      ${PR_HOLDERS_CTE}
+      ${prHoldersCte(userId)}
       SELECT ts.id, ts.exercise_id, e.name AS exercise_name,
              e.category_id, c.color AS category_color,
              ts.date, ts.weight_kg, ts.reps, ts.distance_m, ts.duration_seconds,
@@ -104,21 +110,22 @@ export async function getSetsForDate(date: string): Promise<TrainingSet[]> {
       JOIN category c ON c.id = e.category_id
       JOIN pr_holders ph ON ph.exercise_id = ts.exercise_id
       LEFT JOIN pr_reps_holders prh ON prh.id = ts.id
-      WHERE ts.date = ?
+      WHERE ts.date = ? AND ts.user_id = ?
       ORDER BY ts.id ASC
     `,
-    args: [date],
+    args: [date, userId],
   });
   return res.rows as unknown as TrainingSet[];
 }
 
-export async function getDayPrCounts(dates: string[]): Promise<Map<string, DayPrCounts>> {
+export async function getDayPrCounts(userId: string, dates: string[]): Promise<Map<string, DayPrCounts>> {
+  assertSafeUserId(userId);
   const map = new Map<string, DayPrCounts>();
   if (!dates.length) return map;
   const placeholders = dates.map(() => '?').join(',');
   const res = await db.execute({
     sql: `
-      ${PR_HOLDERS_CTE}
+      ${prHoldersCte(userId)}
       SELECT ts.date,
              SUM(CASE WHEN ts.id = ph.pr_w_id   THEN 1 ELSE 0 END) AS pr_weight,
              SUM(CASE WHEN ts.id = ph.pr_1rm_id THEN 1 ELSE 0 END) AS pr_1rm,
@@ -126,10 +133,10 @@ export async function getDayPrCounts(dates: string[]): Promise<Map<string, DayPr
       FROM training_set ts
       JOIN pr_holders ph ON ph.exercise_id = ts.exercise_id
       LEFT JOIN pr_reps_holders prh ON prh.id = ts.id
-      WHERE ts.date IN (${placeholders})
+      WHERE ts.date IN (${placeholders}) AND ts.user_id = ?
       GROUP BY ts.date
     `,
-    args: dates,
+    args: [...dates, userId],
   });
   for (const row of res.rows) {
     map.set(row.date as string, {
@@ -149,7 +156,7 @@ export interface TrainingDay {
   categories: string; // comma separated colors
 }
 
-export async function getTrainingDaysInRange(from: string, to: string): Promise<TrainingDay[]> {
+export async function getTrainingDaysInRange(userId: string, from: string, to: string): Promise<TrainingDay[]> {
   const res = await db.execute({
     sql: `
       SELECT ts.date,
@@ -160,25 +167,25 @@ export async function getTrainingDaysInRange(from: string, to: string): Promise<
       FROM training_set ts
       JOIN exercise e ON e.id = ts.exercise_id
       JOIN category c ON c.id = e.category_id
-      WHERE ts.date BETWEEN ? AND ?
+      WHERE ts.user_id = ? AND ts.date BETWEEN ? AND ?
       GROUP BY ts.date
       ORDER BY ts.date ASC
     `,
-    args: [from, to],
+    args: [userId, from, to],
   });
   return res.rows as unknown as TrainingDay[];
 }
 
-export async function getExerciseById(id: number): Promise<Exercise | null> {
+export async function getExerciseById(userId: string, id: number): Promise<Exercise | null> {
   const res = await db.execute({
     sql: `
       SELECT e.id, e.name, e.category_id, c.name AS category_name, c.color AS category_color,
              e.is_favorite, NULL AS last_used
       FROM exercise e
       JOIN category c ON c.id = e.category_id
-      WHERE e.id = ?
+      WHERE e.id = ? AND e.user_id = ?
     `,
-    args: [id],
+    args: [id, userId],
   });
   return (res.rows[0] as unknown as Exercise) ?? null;
 }
@@ -189,15 +196,13 @@ export interface ExerciseSessionStat {
   est_1rm: number;
   total_volume: number;
   set_count: number;
-  /** Weight/reps of the top-weight set that day (tiebreak: higher reps). */
   top_set_weight: number;
   top_set_reps: number;
-  /** Weight/reps of the set that produced the best 1RM that day. */
   rm_set_weight: number;
   rm_set_reps: number;
 }
 
-export async function getExerciseSessionStats(exerciseId: number): Promise<ExerciseSessionStat[]> {
+export async function getExerciseSessionStats(userId: string, exerciseId: number): Promise<ExerciseSessionStat[]> {
   const res = await db.execute({
     sql: `
       WITH d AS (
@@ -205,23 +210,19 @@ export async function getExerciseSessionStats(exerciseId: number): Promise<Exerc
                weight_kg * (1.0 + reps / 30.0) AS est,
                weight_kg * reps                AS vol
         FROM training_set
-        WHERE exercise_id = ?
+        WHERE exercise_id = ? AND user_id = ?
       ),
       top_by_weight AS (
         SELECT date, weight_kg, reps
-        FROM (
-          SELECT date, weight_kg, reps,
-                 ROW_NUMBER() OVER (PARTITION BY date ORDER BY weight_kg DESC, reps DESC, id ASC) AS rn
-          FROM d
-        ) t WHERE rn = 1
+        FROM (SELECT date, weight_kg, reps,
+                     ROW_NUMBER() OVER (PARTITION BY date ORDER BY weight_kg DESC, reps DESC, id ASC) AS rn
+              FROM d) t WHERE rn = 1
       ),
       top_by_1rm AS (
         SELECT date, weight_kg, reps
-        FROM (
-          SELECT date, weight_kg, reps,
-                 ROW_NUMBER() OVER (PARTITION BY date ORDER BY est DESC, id ASC) AS rn
-          FROM d
-        ) t WHERE rn = 1
+        FROM (SELECT date, weight_kg, reps,
+                     ROW_NUMBER() OVER (PARTITION BY date ORDER BY est DESC, id ASC) AS rn
+              FROM d) t WHERE rn = 1
       ),
       agg AS (
         SELECT date,
@@ -240,12 +241,12 @@ export async function getExerciseSessionStats(exerciseId: number): Promise<Exerc
       JOIN top_by_1rm tr    ON tr.date = a.date
       ORDER BY a.date ASC
     `,
-    args: [exerciseId],
+    args: [exerciseId, userId],
   });
   return res.rows as unknown as ExerciseSessionStat[];
 }
 
-export async function getExerciseSetsHistory(exerciseId: number, limit = 200): Promise<TrainingSet[]> {
+export async function getExerciseSetsHistory(userId: string, exerciseId: number, limit = 200): Promise<TrainingSet[]> {
   const res = await db.execute({
     sql: `
       SELECT ts.id, ts.exercise_id, e.name AS exercise_name,
@@ -255,32 +256,35 @@ export async function getExerciseSetsHistory(exerciseId: number, limit = 200): P
       FROM training_set ts
       JOIN exercise e ON e.id = ts.exercise_id
       JOIN category c ON c.id = e.category_id
-      WHERE ts.exercise_id = ?
+      WHERE ts.exercise_id = ? AND ts.user_id = ?
       ORDER BY ts.date DESC, ts.id DESC
       LIMIT ?
     `,
-    args: [exerciseId, limit],
+    args: [exerciseId, userId, limit],
   });
   return res.rows as unknown as TrainingSet[];
 }
 
-export async function getWorkoutComment(date: string): Promise<string | null> {
+export async function getWorkoutComment(userId: string, date: string): Promise<string | null> {
   const res = await db.execute({
-    sql: 'SELECT body FROM workout_comment WHERE date = ?',
-    args: [date],
+    sql: 'SELECT body FROM workout_comment WHERE date = ? AND user_id = ?',
+    args: [date, userId],
   });
   return (res.rows[0]?.body as string) ?? null;
 }
 
-export async function setWorkoutComment(date: string, body: string): Promise<void> {
+export async function setWorkoutComment(userId: string, date: string, body: string): Promise<void> {
   if (!body.trim()) {
-    await db.execute({ sql: 'DELETE FROM workout_comment WHERE date = ?', args: [date] });
+    await db.execute({
+      sql: 'DELETE FROM workout_comment WHERE date = ? AND user_id = ?',
+      args: [date, userId],
+    });
     return;
   }
   await db.execute({
-    sql: `INSERT INTO workout_comment (date, body) VALUES (?, ?)
-          ON CONFLICT(date) DO UPDATE SET body = excluded.body`,
-    args: [date, body],
+    sql: `INSERT INTO workout_comment (user_id, date, body) VALUES (?, ?, ?)
+          ON CONFLICT(user_id, date) DO UPDATE SET body = excluded.body`,
+    args: [userId, date, body],
   });
 }
 
