@@ -46,14 +46,57 @@ export interface DayPrCounts {
 // for reads of data that rarely changes (categories, exercise catalogue).
 // Invalidation happens on writes that affect the cached shape.
 
+// Generic TTL cache. One map per query kind so we can invalidate selectively.
+interface Entry<T> { data: T; expires: number }
 const CATEGORY_TTL_MS = 10 * 60_000;
 const EXERCISES_TTL_MS = 60_000;
+const SETS_TTL_MS = 30_000;
+const DAYS_TTL_MS = 60_000;
+const STATS_TTL_MS = 60_000;
 
-let categoriesCache: { data: Category[]; expires: number } | null = null;
-const exercisesCache = new Map<string, { data: Exercise[]; expires: number }>();
+let categoriesCache: Entry<Category[]> | null = null;
+const exercisesCache     = new Map<string, Entry<Exercise[]>>();
+const setsForDateCache   = new Map<string, Entry<TrainingSet[]>>();
+const dayPrCountsCache   = new Map<string, Entry<Map<string, DayPrCounts>>>();
+const rangeCache         = new Map<string, Entry<TrainingDay[]>>();
+const exerciseByIdCache  = new Map<string, Entry<Exercise | null>>();
+const sessionStatsCache  = new Map<string, Entry<ExerciseSessionStat[]>>();
+const historyCache       = new Map<string, Entry<TrainingSet[]>>();
+const commentCache       = new Map<string, Entry<string | null>>();
+
+function getFresh<T>(map: Map<string, Entry<T>>, key: string): T | null {
+  const hit = map.get(key);
+  if (!hit) return null;
+  if (hit.expires <= Date.now()) { map.delete(key); return null; }
+  return hit.data;
+}
+
+function store<T>(map: Map<string, Entry<T>>, key: string, data: T, ttl: number) {
+  map.set(key, { data, expires: Date.now() + ttl });
+}
+
+function clearUserPrefix<T>(map: Map<string, Entry<T>>, userId: string) {
+  for (const k of map.keys()) if (k.startsWith(`${userId}|`)) map.delete(k);
+}
 
 export function invalidateExercisesCache(userId: string) {
   exercisesCache.delete(userId);
+  clearUserPrefix(exerciseByIdCache, userId);
+}
+
+/** A training_set mutation invalidates everything that aggregates sets. */
+export function invalidateSetsCache(userId: string) {
+  clearUserPrefix(setsForDateCache, userId);
+  clearUserPrefix(dayPrCountsCache, userId);
+  clearUserPrefix(rangeCache, userId);
+  clearUserPrefix(sessionStatsCache, userId);
+  clearUserPrefix(historyCache, userId);
+  // last_used column on Exercise depends on sets, so invalidate the catalogue too.
+  exercisesCache.delete(userId);
+}
+
+export function invalidateCommentCache(userId: string) {
+  clearUserPrefix(commentCache, userId);
 }
 
 // Categories are global (shared by every user).
@@ -119,6 +162,9 @@ function assertSafeUserId(userId: string) {
 
 export async function getSetsForDate(userId: string, date: string): Promise<TrainingSet[]> {
   assertSafeUserId(userId);
+  const key = `${userId}|${date}`;
+  const cached = getFresh(setsForDateCache, key);
+  if (cached) return cached;
   const res = await db.execute({
     sql: `
       ${prHoldersCte(userId)}
@@ -139,13 +185,18 @@ export async function getSetsForDate(userId: string, date: string): Promise<Trai
     `,
     args: [date, userId],
   });
-  return res.rows as unknown as TrainingSet[];
+  const data = res.rows as unknown as TrainingSet[];
+  store(setsForDateCache, key, data, SETS_TTL_MS);
+  return data;
 }
 
 export async function getDayPrCounts(userId: string, dates: string[]): Promise<Map<string, DayPrCounts>> {
   assertSafeUserId(userId);
   const map = new Map<string, DayPrCounts>();
   if (!dates.length) return map;
+  const key = `${userId}|${dates.join(',')}`;
+  const cached = getFresh(dayPrCountsCache, key);
+  if (cached) return cached;
   const placeholders = dates.map(() => '?').join(',');
   const res = await db.execute({
     sql: `
@@ -169,6 +220,7 @@ export async function getDayPrCounts(userId: string, dates: string[]): Promise<M
       pr_reps: Number(row.pr_reps) || 0,
     });
   }
+  store(dayPrCountsCache, key, map, DAYS_TTL_MS);
   return map;
 }
 
@@ -181,6 +233,9 @@ export interface TrainingDay {
 }
 
 export async function getTrainingDaysInRange(userId: string, from: string, to: string): Promise<TrainingDay[]> {
+  const key = `${userId}|${from}|${to}`;
+  const cached = getFresh(rangeCache, key);
+  if (cached) return cached;
   const res = await db.execute({
     sql: `
       SELECT ts.date,
@@ -197,10 +252,15 @@ export async function getTrainingDaysInRange(userId: string, from: string, to: s
     `,
     args: [userId, from, to],
   });
-  return res.rows as unknown as TrainingDay[];
+  const data = res.rows as unknown as TrainingDay[];
+  store(rangeCache, key, data, DAYS_TTL_MS);
+  return data;
 }
 
 export async function getExerciseById(userId: string, id: number): Promise<Exercise | null> {
+  const key = `${userId}|${id}`;
+  const cached = getFresh(exerciseByIdCache, key);
+  if (cached !== null) return cached;
   const res = await db.execute({
     sql: `
       SELECT e.id, e.name, e.category_id, c.name AS category_name, c.color AS category_color,
@@ -211,7 +271,9 @@ export async function getExerciseById(userId: string, id: number): Promise<Exerc
     `,
     args: [id, userId],
   });
-  return (res.rows[0] as unknown as Exercise) ?? null;
+  const data = (res.rows[0] as unknown as Exercise) ?? null;
+  store(exerciseByIdCache, key, data, EXERCISES_TTL_MS);
+  return data;
 }
 
 export interface ExerciseSessionStat {
@@ -227,6 +289,9 @@ export interface ExerciseSessionStat {
 }
 
 export async function getExerciseSessionStats(userId: string, exerciseId: number): Promise<ExerciseSessionStat[]> {
+  const key = `${userId}|${exerciseId}`;
+  const cached = getFresh(sessionStatsCache, key);
+  if (cached) return cached;
   const res = await db.execute({
     sql: `
       WITH d AS (
@@ -267,10 +332,15 @@ export async function getExerciseSessionStats(userId: string, exerciseId: number
     `,
     args: [exerciseId, userId],
   });
-  return res.rows as unknown as ExerciseSessionStat[];
+  const data = res.rows as unknown as ExerciseSessionStat[];
+  store(sessionStatsCache, key, data, STATS_TTL_MS);
+  return data;
 }
 
 export async function getExerciseSetsHistory(userId: string, exerciseId: number, limit = 200): Promise<TrainingSet[]> {
+  const key = `${userId}|${exerciseId}|${limit}`;
+  const cached = getFresh(historyCache, key);
+  if (cached) return cached;
   const res = await db.execute({
     sql: `
       SELECT ts.id, ts.exercise_id, e.name AS exercise_name,
@@ -286,15 +356,24 @@ export async function getExerciseSetsHistory(userId: string, exerciseId: number,
     `,
     args: [exerciseId, userId, limit],
   });
-  return res.rows as unknown as TrainingSet[];
+  const data = res.rows as unknown as TrainingSet[];
+  store(historyCache, key, data, STATS_TTL_MS);
+  return data;
 }
 
 export async function getWorkoutComment(userId: string, date: string): Promise<string | null> {
+  const key = `${userId}|${date}`;
+  if (commentCache.has(key)) {
+    const hit = commentCache.get(key)!;
+    if (hit.expires > Date.now()) return hit.data;
+  }
   const res = await db.execute({
     sql: 'SELECT body FROM workout_comment WHERE date = ? AND user_id = ?',
     args: [date, userId],
   });
-  return (res.rows[0]?.body as string) ?? null;
+  const body = (res.rows[0]?.body as string) ?? null;
+  store(commentCache, key, body, SETS_TTL_MS);
+  return body;
 }
 
 export async function setWorkoutComment(userId: string, date: string, body: string): Promise<void> {
@@ -303,13 +382,14 @@ export async function setWorkoutComment(userId: string, date: string, body: stri
       sql: 'DELETE FROM workout_comment WHERE date = ? AND user_id = ?',
       args: [date, userId],
     });
-    return;
+  } else {
+    await db.execute({
+      sql: `INSERT INTO workout_comment (user_id, date, body) VALUES (?, ?, ?)
+            ON CONFLICT(user_id, date) DO UPDATE SET body = excluded.body`,
+      args: [userId, date, body],
+    });
   }
-  await db.execute({
-    sql: `INSERT INTO workout_comment (user_id, date, body) VALUES (?, ?, ?)
-          ON CONFLICT(user_id, date) DO UPDATE SET body = excluded.body`,
-    args: [userId, date, body],
-  });
+  invalidateCommentCache(userId);
 }
 
 export function todayISO(): string {

@@ -7,7 +7,10 @@ import tailwindcss from '@tailwindcss/vite';
 export default defineConfig({
   output: 'server',
   adapter: vercel({
-    // Bundle native binaries (Resvg) so the PNG export endpoint works on Vercel.
+    // Pin the function to Dublin — same AWS region (eu-west-1) as the Turso
+    // database, so round-trip time is <10ms instead of ~100ms across the
+    // Atlantic.
+    regions: ['dub1'],
     includeFiles: [
       './src/fonts/Inter-Regular.ttf',
       './src/fonts/Inter-SemiBold.ttf',
@@ -15,6 +18,12 @@ export default defineConfig({
     ],
   }),
   integrations: [react()],
+  // Speculative prefetch on hover makes navigation feel instant for the
+  // next page the user is likely to click.
+  prefetch: {
+    prefetchAll: true,
+    defaultStrategy: 'hover',
+  },
   vite: {
     plugins: [tailwindcss()],
     ssr: {

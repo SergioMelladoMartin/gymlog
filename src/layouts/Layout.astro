@@ -1,5 +1,6 @@
 ---
 import '../styles/global.css';
+import { ClientRouter } from 'astro:transitions';
 import UserMenu from '../components/UserMenu';
 
 interface Props {
@@ -27,7 +28,8 @@ const links: Array<{ key: NonNullable<Props['activeNav']>; href: string; label: 
     <link rel="preconnect" href="https://rsms.me/" />
     <link rel="stylesheet" href="https://rsms.me/inter/inter.css" />
     <title>{title}</title>
-    <script is:inline>
+    <ClientRouter />
+    <script is:inline data-astro-rerun>
       (function () {
         try {
           var stored = localStorage.getItem('theme');

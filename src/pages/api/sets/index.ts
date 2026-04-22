@@ -1,6 +1,6 @@
 import type { APIRoute } from 'astro';
 import { db } from '../../../lib/db';
-import { getSetsForDate, invalidateExercisesCache } from '../../../lib/queries';
+import { getSetsForDate, invalidateSetsCache } from '../../../lib/queries';
 
 export const prerender = false;
 
@@ -59,7 +59,6 @@ export const POST: APIRoute = async ({ request, locals }) => {
   const pr_1rm = h.pr_1rm_id === id ? 1 : 0;
   const pr_reps = h.pr_reps_id === id ? 1 : 0;
 
-  // last_used is part of the exercises cache.
-  invalidateExercisesCache(userId);
+  invalidateSetsCache(userId);
   return Response.json({ id, position, pr_weight, pr_1rm, pr_reps });
 };

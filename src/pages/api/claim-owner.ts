@@ -1,32 +1,33 @@
 import type { APIRoute } from 'astro';
 import { db } from '../../lib/db';
+import { invalidateSetsCache } from '../../lib/queries';
 
 export const prerender = false;
 
 /**
- * The existing 131 exercises + 10,918 training sets imported from FitNotes
- * belong to Sergio. Only he can claim them, regardless of registration order.
- * Everyone else starts with an empty workspace (shared categories, nothing
- * else). If the owner re-registers after a wipe he reclaims automatically.
+ * First-user-wins claim. When the authenticated user calls this endpoint:
+ *   - If no training_set row has ever been assigned to any user, attach all
+ *     current orphan rows to the caller.
+ *   - Otherwise return {claimed:false, reason:'already claimed'}.
+ *
+ * This preserves isolation (only one user owns the seed data) while avoiding
+ * strict email pinning that can trip up after account recreation.
  */
-const OWNER_EMAIL = 'sergiomellado15@gmail.com';
-
 export const POST: APIRoute = async ({ locals }) => {
   if (!locals.user) return new Response('Unauthorized', { status: 401 });
-  const email = locals.user.email.trim().toLowerCase();
-
-  if (email !== OWNER_EMAIL) {
-    return Response.json({ claimed: false, reason: 'not owner' });
-  }
-
   const userId = locals.user.id;
+
+  const alreadyClaimed = await db.execute({
+    sql: 'SELECT 1 FROM training_set WHERE user_id IS NOT NULL LIMIT 1',
+  });
+  if (alreadyClaimed.rows.length) {
+    return Response.json({ claimed: false, reason: 'already claimed' });
+  }
 
   const orphanRes = await db.execute({
     sql: 'SELECT COUNT(*) AS c FROM training_set WHERE user_id IS NULL',
-    args: [],
   });
   const orphanCount = Number(orphanRes.rows[0]?.c ?? 0);
-
   if (orphanCount === 0) {
     return Response.json({ claimed: false, reason: 'nothing to claim' });
   }
@@ -41,5 +42,6 @@ export const POST: APIRoute = async ({ locals }) => {
     'write',
   );
 
+  invalidateSetsCache(userId);
   return Response.json({ claimed: true, sets: orphanCount });
 };
