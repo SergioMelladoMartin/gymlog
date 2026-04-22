@@ -46,61 +46,65 @@ const userWhere = filter.where ? `${filter.where} AND user_id = ?` : 'WHERE user
 const userWhereTs = filter.whereTs ? `${filter.whereTs} AND ts.user_id = ?` : 'WHERE ts.user_id = ?';
 const args = [...filter.args, user.id];
 
-const totalsRes = await db.execute({
-  sql: `SELECT COUNT(*)                       AS total_sets,
-               COUNT(DISTINCT date)           AS total_days,
-               COUNT(DISTINCT exercise_id)    AS total_exercises,
-               SUM(weight_kg * reps)          AS total_volume,
-               MIN(date)                      AS first_day,
-               MAX(date)                      AS last_day
-        FROM training_set ${userWhere}`,
-  args,
-});
+// Fan all five reads out in parallel — libSQL multiplexes over HTTP/2 so
+// the page effectively waits for the slowest query, not the sum.
+const [totalsRes, perCategoryRes, topExercisesRes, weekdayRes] = await Promise.all([
+  db.execute({
+    sql: `SELECT COUNT(*)                       AS total_sets,
+                 COUNT(DISTINCT date)           AS total_days,
+                 COUNT(DISTINCT exercise_id)    AS total_exercises,
+                 SUM(weight_kg * reps)          AS total_volume,
+                 MIN(date)                      AS first_day,
+                 MAX(date)                      AS last_day
+          FROM training_set ${userWhere}`,
+    args,
+  }),
+  db.execute({
+    sql: `SELECT c.id, c.name, c.color,
+                 COUNT(*)                           AS set_count,
+                 SUM(ts.weight_kg * ts.reps)        AS volume,
+                 COUNT(DISTINCT ts.date)            AS day_count
+          FROM training_set ts
+          JOIN exercise e ON e.id = ts.exercise_id
+          JOIN category c ON c.id = e.category_id
+          ${userWhereTs}
+          GROUP BY c.id
+          ORDER BY volume DESC`,
+    args,
+  }),
+  db.execute({
+    sql: `SELECT e.id, e.name, c.color AS color, COUNT(*) AS set_count
+          FROM training_set ts
+          JOIN exercise e ON e.id = ts.exercise_id
+          JOIN category c ON c.id = e.category_id
+          ${userWhereTs}
+          GROUP BY e.id
+          ORDER BY set_count DESC
+          LIMIT 10`,
+    args,
+  }),
+  db.execute({
+    sql: `SELECT CAST(strftime('%w', date) AS INTEGER) AS dow, COUNT(DISTINCT date) AS c
+          FROM training_set ${userWhere}
+          GROUP BY dow`,
+    args,
+  }),
+]);
+
 const totals = totalsRes.rows[0] as unknown as {
   total_sets: number; total_days: number; total_exercises: number; total_volume: number;
   first_day: string | null; last_day: string | null;
 };
 
-const perCategoryRes = await db.execute({
-  sql: `SELECT c.id, c.name, c.color,
-               COUNT(*)                           AS set_count,
-               SUM(ts.weight_kg * ts.reps)        AS volume,
-               COUNT(DISTINCT ts.date)            AS day_count
-        FROM training_set ts
-        JOIN exercise e ON e.id = ts.exercise_id
-        JOIN category c ON c.id = e.category_id
-        ${userWhereTs}
-        GROUP BY c.id
-        ORDER BY volume DESC`,
-  args,
-});
 const perCategory = perCategoryRes.rows as unknown as Array<{
   id: number; name: string; color: string | null; set_count: number; volume: number; day_count: number;
 }>;
 const maxVolume = perCategory.reduce((acc, c) => Math.max(acc, c.volume ?? 0), 0);
 
-const topExercisesRes = await db.execute({
-  sql: `SELECT e.id, e.name, c.color AS color, COUNT(*) AS set_count
-        FROM training_set ts
-        JOIN exercise e ON e.id = ts.exercise_id
-        JOIN category c ON c.id = e.category_id
-        ${userWhereTs}
-        GROUP BY e.id
-        ORDER BY set_count DESC
-        LIMIT 10`,
-  args,
-});
 const topExercises = topExercisesRes.rows as unknown as Array<{
   id: number; name: string; color: string | null; set_count: number;
 }>;
 
-// Weekly distribution across selected range
-const weekdayRes = await db.execute({
-  sql: `SELECT CAST(strftime('%w', date) AS INTEGER) AS dow, COUNT(DISTINCT date) AS c
-        FROM training_set ${userWhere}
-        GROUP BY dow`,
-  args,
-});
 const weekdayMap = new Map<number, number>();
 for (const row of weekdayRes.rows as unknown as Array<{ dow: number; c: number }>) {
   weekdayMap.set(row.dow, row.c);

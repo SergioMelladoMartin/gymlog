@@ -53,21 +53,51 @@ const days = res.rows as unknown as Array<{
   volume: number;
 }>;
 
-const breakdownRes = days.length
-  ? await db.execute({
-      sql: `
-        SELECT ts.date, e.name AS exercise_name, c.color AS category_color,
-               COUNT(*) AS sets, MAX(ts.weight_kg) AS top_weight, MAX(ts.reps) AS top_reps
-        FROM training_set ts
-        JOIN exercise e ON e.id = ts.exercise_id
-        JOIN category c ON c.id = e.category_id
-        WHERE ts.user_id = ? AND ts.date IN (${days.map(() => '?').join(',')})
-        GROUP BY ts.date, ts.exercise_id
-        ORDER BY ts.date DESC, MIN(ts.id) ASC
-      `,
-      args: [user.id, ...days.map((d) => d.date)],
-    })
-  : { rows: [] as any[] };
+const oldestDate = days.at(-1)?.date;
+const newestDate = days[0]?.date;
+const paged = !!(before || after);
+const dateArgs = days.map((d) => d.date);
+const dateIn = dateArgs.map(() => '?').join(',');
+
+// Fire every dependent query in parallel — single HTTP/2 roundtrip to Turso
+// thanks to libSQL multiplexing. Previously these ran sequentially for ~5×
+// the latency.
+const [breakdownRes, commentsRes, prsByDate, olderRes, newerRes] = await Promise.all([
+  days.length
+    ? db.execute({
+        sql: `
+          SELECT ts.date, e.name AS exercise_name, c.color AS category_color,
+                 COUNT(*) AS sets, MAX(ts.weight_kg) AS top_weight, MAX(ts.reps) AS top_reps
+          FROM training_set ts
+          JOIN exercise e ON e.id = ts.exercise_id
+          JOIN category c ON c.id = e.category_id
+          WHERE ts.user_id = ? AND ts.date IN (${dateIn})
+          GROUP BY ts.date, ts.exercise_id
+          ORDER BY ts.date DESC, MIN(ts.id) ASC
+        `,
+        args: [user.id, ...dateArgs],
+      })
+    : Promise.resolve({ rows: [] as any[] }),
+  days.length
+    ? db.execute({
+        sql: `SELECT date, body FROM workout_comment WHERE user_id = ? AND date IN (${dateIn})`,
+        args: [user.id, ...dateArgs],
+      })
+    : Promise.resolve({ rows: [] as any[] }),
+  getDayPrCounts(user.id, dateArgs),
+  oldestDate
+    ? db.execute({
+        sql: 'SELECT EXISTS(SELECT 1 FROM training_set WHERE user_id = ? AND date < ?) AS has',
+        args: [user.id, oldestDate],
+      })
+    : Promise.resolve({ rows: [{ has: 0 }] } as any),
+  newestDate && paged
+    ? db.execute({
+        sql: 'SELECT EXISTS(SELECT 1 FROM training_set WHERE user_id = ? AND date > ?) AS has',
+        args: [user.id, newestDate],
+      })
+    : Promise.resolve({ rows: [{ has: 0 }] } as any),
+]);
 
 const breakdown = new Map<string, Array<{ exercise_name: string; category_color: string | null; sets: number; top_weight: number; top_reps: number }>>();
 for (const row of breakdownRes.rows as unknown as Array<{ date: string; exercise_name: string; category_color: string | null; sets: number; top_weight: number; top_reps: number }>) {
@@ -75,19 +105,13 @@ for (const row of breakdownRes.rows as unknown as Array<{ date: string; exercise
   breakdown.get(row.date)!.push(row);
 }
 
-const commentsRes = days.length
-  ? await db.execute({
-      sql: `SELECT date, body FROM workout_comment
-            WHERE user_id = ? AND date IN (${days.map(() => '?').join(',')})`,
-      args: [user.id, ...days.map((d) => d.date)],
-    })
-  : { rows: [] as any[] };
 const comments = new Map<string, string>();
 for (const row of commentsRes.rows as unknown as Array<{ date: string; body: string }>) {
   comments.set(row.date, row.body);
 }
 
-const prsByDate = await getDayPrCounts(user.id, days.map((d) => d.date));
+const hasOlder = !!olderRes.rows[0]?.has;
+const hasNewer = !!newerRes.rows[0]?.has;
 
 const formatDate = (iso: string) => {
   const d = new Date(iso + 'T00:00:00');
@@ -98,27 +122,6 @@ const formatDate = (iso: string) => {
     year: d.getFullYear(),
   };
 };
-
-const oldestDate = days.at(-1)?.date;
-const newestDate = days[0]?.date;
-const paged = !!(before || after);
-
-// Has-more checks: do any days exist outside the current window?
-let hasOlder = false, hasNewer = false;
-if (oldestDate) {
-  const r = await db.execute({
-    sql: 'SELECT EXISTS(SELECT 1 FROM training_set WHERE user_id = ? AND date < ?) AS has',
-    args: [user.id, oldestDate],
-  });
-  hasOlder = !!r.rows[0]?.has;
-}
-if (newestDate && paged) {
-  const r = await db.execute({
-    sql: 'SELECT EXISTS(SELECT 1 FROM training_set WHERE user_id = ? AND date > ?) AS has',
-    args: [user.id, newestDate],
-  });
-  hasNewer = !!r.rows[0]?.has;
-}
 ---
 <Layout title="Diario · gymlog" activeNav="diary">
   <div class="mb-4 flex items-end justify-between gap-3">
