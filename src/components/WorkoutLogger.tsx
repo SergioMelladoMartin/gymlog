@@ -424,24 +424,34 @@ function QuickAdd({
   lastSets: TrainingSet[];
 }) {
   const [draft, setDraft] = useState<DraftSet>({ weight: '', reps: '' });
+  const [justAdded, setJustAdded] = useState(false);
   const weightRef = useRef<HTMLInputElement>(null);
-  const last = lastSets.at(-1);
+  const submittingRef = useRef(false);
 
+  // Seed the form only when the exercise changes — NOT every time a new set
+  // is added. Otherwise adding a set would repopulate the reps field from
+  // the just-added set and lead to accidental double-submits.
   useEffect(() => {
+    const last = lastSets.at(-1);
     setDraft({
       weight: last ? String(last.weight_kg) : '',
       reps: last ? String(last.reps) : '',
     });
     weightRef.current?.focus();
-  }, [exerciseId, last?.id]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exerciseId]);
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (submittingRef.current) return;           // ignore rapid re-submits
     const w = parseFloat(draft.weight.replace(',', '.'));
     const r = parseInt(draft.reps, 10);
     if (isNaN(w) || isNaN(r) || r <= 0) return;
+    submittingRef.current = true;
     onAdd(exerciseId, w, r);
     setDraft({ weight: String(w), reps: '' });
+    setJustAdded(true);
+    setTimeout(() => { setJustAdded(false); submittingRef.current = false; }, 400);
     weightRef.current?.focus();
   }
 
@@ -453,9 +463,15 @@ function QuickAdd({
         type="submit"
         className="grid h-[58px] w-14 place-items-center rounded-xl bg-accent font-bold text-ink transition hover:brightness-110 active:scale-95 disabled:opacity-40"
         disabled={!draft.weight || !draft.reps}
-        aria-label="Añadir set"
+        aria-label={justAdded ? 'Añadido' : 'Añadir set'}
       >
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M12 5v14" /><path d="M5 12h14" /></svg>
+        {justAdded ? (
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+        ) : (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M12 5v14" /><path d="M5 12h14" /></svg>
+        )}
       </button>
     </form>
   );
@@ -908,23 +924,31 @@ function QuickAddCardio({
 }) {
   const [duration, setDuration] = useState('');
   const [distance, setDistance] = useState('');
+  const [justAdded, setJustAdded] = useState(false);
   const durationRef = useRef<HTMLInputElement>(null);
-  const last = lastSets.at(-1);
+  const submittingRef = useRef(false);
 
+  // Seed only when the exercise changes, not on every new set.
   useEffect(() => {
+    const last = lastSets.at(-1);
     setDuration(last && last.duration_seconds ? formatDuration(last.duration_seconds) : '');
     setDistance(last && last.distance_m ? (last.distance_m / 1000).toString() : '');
     durationRef.current?.focus();
-  }, [exerciseId, last?.id]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exerciseId]);
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (submittingRef.current) return;
     const sec = parseDuration(duration);
     if (!sec || sec <= 0) return;
     const km = distance.trim() ? parseFloat(distance.replace(',', '.')) : 0;
     const meters = isNaN(km) ? 0 : Math.round(km * 1000);
+    submittingRef.current = true;
     onAdd(exerciseId, sec, meters);
     setDistance('');
+    setJustAdded(true);
+    setTimeout(() => { setJustAdded(false); submittingRef.current = false; }, 400);
     durationRef.current?.focus();
   }
 
@@ -957,9 +981,15 @@ function QuickAddCardio({
         type="submit"
         className="grid h-[58px] w-14 place-items-center rounded-xl bg-accent font-bold text-ink transition hover:brightness-110 active:scale-95 disabled:opacity-40"
         disabled={!duration.trim()}
-        aria-label="Añadir serie"
+        aria-label={justAdded ? 'Añadido' : 'Añadir serie'}
       >
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M12 5v14" /><path d="M5 12h14" /></svg>
+        {justAdded ? (
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+        ) : (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M12 5v14" /><path d="M5 12h14" /></svg>
+        )}
       </button>
     </form>
   );
@@ -1039,28 +1069,29 @@ function CreateExerciseForm({
 function PrBadges({ set }: { set: TrainingSet }) {
   const badges: Array<{ label: string; title: string; icon: React.ReactNode }> = [];
   if (set.pr_weight) badges.push({
-    label: 'PESO', title: 'Récord de peso máximo',
-    icon: <svg width="8" height="8" viewBox="0 0 24 24" fill="currentColor"><path d="M20.5 9H20V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v3h-.5a1.5 1.5 0 0 0 0 3H4v1a8 8 0 0 0 5 7.42V22a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1v-1.58A8 8 0 0 0 20 13v-1h.5a1.5 1.5 0 0 0 0-3z"/></svg>,
+    label: 'W', title: 'Récord de peso máximo',
+    icon: <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M20.5 9H20V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v3h-.5a1.5 1.5 0 0 0 0 3H4v1a8 8 0 0 0 5 7.42V22a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1v-1.58A8 8 0 0 0 20 13v-1h.5a1.5 1.5 0 0 0 0-3z"/></svg>,
   });
   if (set.pr_1rm) badges.push({
     label: '1RM', title: 'Récord de 1RM estimado',
-    icon: <svg width="8" height="8" viewBox="0 0 24 24" fill="currentColor"><path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>,
+    icon: <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>,
   });
   if (set.pr_reps) badges.push({
-    label: 'REPS', title: 'Récord de repeticiones a este peso',
-    icon: <svg width="8" height="8" viewBox="0 0 24 24" fill="currentColor"><path d="M7.5 2h9l1.5 3h3.5l-2.5 5a6 6 0 0 1-4.4 3.85L14 18h2v2H8v-2h2l-.6-4.15A6 6 0 0 1 5 10L2.5 5H6z"/></svg>,
+    label: 'R', title: 'Récord de repeticiones a este peso',
+    icon: <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M7.5 2h9l1.5 3h3.5l-2.5 5a6 6 0 0 1-4.4 3.85L14 18h2v2H8v-2h2l-.6-4.15A6 6 0 0 1 5 10L2.5 5H6z"/></svg>,
   });
   if (!badges.length) return null;
+  // Icon-only circular badges so three PRs never overflow the row.
   return (
-    <span className="ml-1 flex gap-1">
+    <span className="ml-1 flex flex-wrap gap-0.5">
       {badges.map((b) => (
         <span
           key={b.label}
           title={b.title}
-          className="inline-flex items-center gap-0.5 rounded-md bg-accent px-1.5 py-0.5 text-[9px] font-bold uppercase leading-none tracking-wider text-ink"
+          aria-label={b.title}
+          className="grid h-5 w-5 place-items-center rounded-full bg-accent text-ink"
         >
           {b.icon}
-          {b.label}
         </span>
       ))}
     </span>
