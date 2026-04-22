@@ -1,0 +1,140 @@
+@import "tailwindcss";
+
+/* Tokens: the @theme values are literals (dark theme defaults). To switch
+   themes we just re-declare the same --color-* variables on :root[data-theme=...].
+   Tailwind-generated utilities read them live via var() so themes cascade. */
+@theme {
+  --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+
+  --color-bg: #0b0b0f;
+  --color-fg: #ededf1;
+  --color-card: #17171d;
+  --color-elevated: #20202a;
+  --color-border: #2a2a34;
+  --color-strong: #3a3a46;
+  --color-muted: #8a8a96;
+  --color-subtle: #a5a5b1;
+  --color-accent: #a3e635;
+  --color-ink: #0a1400;
+  --color-accent-soft: rgba(163, 230, 53, 0.14);
+  --color-danger: #ef4444;
+  --color-success: #10b981;
+
+  --radius-card: 1rem;
+  --radius-lg: 0.75rem;
+}
+
+:root,
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg-glow:
+    radial-gradient(1200px 600px at 85% -10%, rgba(163, 230, 53, 0.06), transparent 60%),
+    radial-gradient(800px 400px at -10% 10%, rgba(124, 92, 255, 0.05), transparent 60%);
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --color-bg: #f7f7f8;
+  --color-fg: #0f0f12;
+  --color-card: #ffffff;
+  --color-elevated: #f0f0f3;
+  --color-border: #e2e2e7;
+  --color-strong: #cfcfd6;
+  --color-muted: #64646e;
+  --color-subtle: #4a4a52;
+  /* Mismo lima en ambos temas — ink oscuro garantiza contraste sobre el verde. */
+  --color-accent: #a3e635;
+  --color-ink: #0a1400;
+  --color-accent-soft: rgba(163, 230, 53, 0.22);
+  --color-danger: #dc2626;
+  --color-success: #059669;
+
+  --bg-glow:
+    radial-gradient(1200px 600px at 85% -10%, rgba(163, 230, 53, 0.18), transparent 60%),
+    radial-gradient(800px 400px at -10% 10%, rgba(59, 130, 246, 0.05), transparent 60%);
+}
+
+/* Reset/base styles must live inside @layer base so Tailwind utility classes
+   (which sit in @layer utilities) can override them. Un-layered rules beat
+   any @layer, which was making `button { color: inherit }` win over
+   `.text-ink { color: var(--color-ink) }`. */
+@layer base {
+  html, body {
+    background: var(--color-bg);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+    font-feature-settings: 'ss01', 'cv11';
+    -webkit-text-size-adjust: 100%;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    background: var(--bg-glow), var(--color-bg);
+    min-height: 100dvh;
+  }
+
+  * { box-sizing: border-box; }
+
+  ::selection { background: var(--color-accent); color: var(--color-ink); }
+
+  input, button, select, textarea { font: inherit; color: inherit; }
+
+  input[type="number"]::-webkit-outer-spin-button,
+  input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  input[type="number"] { -moz-appearance: textfield; }
+
+  input::placeholder, textarea::placeholder { color: var(--color-muted); }
+
+  button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+}
+
+@utility card {
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+}
+
+@utility card-elevated {
+  background: var(--color-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+}
+
+@utility stat-tile {
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: 0.875rem 1rem;
+}
+
+@utility section-title {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+@utility btn-accent {
+  background: var(--color-accent);
+  color: var(--color-ink);
+  font-weight: 600;
+  transition: filter 120ms ease, transform 120ms ease;
+
+  &:hover { filter: brightness(1.08); }
+  &:active { transform: scale(0.97); }
+}
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 10px; border: 2px solid var(--color-bg); }
+::-webkit-scrollbar-thumb:hover { background: var(--color-strong); }
+
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }

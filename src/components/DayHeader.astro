@@ -1,0 +1,100 @@
+---
+import { todayISO } from '../lib/queries';
+
+interface Props {
+  date: string;
+  setCount: number;
+  exerciseCount: number;
+  volume: number;
+  hasPr?: boolean;
+}
+
+const { date, setCount, exerciseCount, volume, hasPr = false } = Astro.props;
+
+const today = todayISO();
+const isToday = date === today;
+
+const d = new Date(date + 'T00:00:00');
+const prev = new Date(d); prev.setDate(prev.getDate() - 1);
+const next = new Date(d); next.setDate(next.getDate() + 1);
+// Format in LOCAL time — `toISOString` shifts to UTC and can roll the date back a day in DST.
+const iso = (x: Date) => {
+  const y = x.getFullYear();
+  const m = String(x.getMonth() + 1).padStart(2, '0');
+  const dd = String(x.getDate()).padStart(2, '0');
+  return `${y}-${m}-${dd}`;
+};
+
+const weekday = d.toLocaleDateString('es-ES', { weekday: 'long' });
+const dayNum = d.getDate();
+const month = d.toLocaleDateString('es-ES', { month: 'long' });
+const year = d.getFullYear();
+const isThisYear = year === new Date().getFullYear();
+---
+<section class="relative mb-5 overflow-hidden rounded-2xl border border-border bg-card">
+  {isToday && <div class="absolute inset-x-0 top-0 h-0.5 bg-accent" />}
+
+  <div class="flex items-center justify-between gap-2 px-4 pt-4 pb-3">
+    <a
+      href={`/day/${iso(prev)}`}
+      class="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-border bg-elevated text-muted transition hover:text-fg"
+      aria-label="Día anterior"
+    >
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6" /></svg>
+    </a>
+
+    <div class="flex min-w-0 flex-1 flex-col items-center text-center">
+      <div class="flex items-center gap-2">
+        <span class="text-xs font-medium uppercase tracking-wider text-muted capitalize">{weekday}</span>
+        {isToday && (
+          <span class="rounded-full bg-accent px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-ink">Hoy</span>
+        )}
+        {hasPr && (
+          <span class="grid h-4 w-4 place-items-center rounded-full bg-accent text-ink" title="Récord personal">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M7.5 2h9l1.5 3h3.5l-2.5 5a6 6 0 0 1-4.4 3.85L14 18h2v2H8v-2h2l-.6-4.15A6 6 0 0 1 5 10L2.5 5H6zm0 2-.47.94L8.4 8.67A4 4 0 0 0 12 11a4 4 0 0 0 3.6-2.33L17.47 4.94 17 4z"/></svg>
+          </span>
+        )}
+      </div>
+      <h1 class="text-3xl font-semibold leading-tight tracking-tight tabular-nums capitalize">
+        {dayNum} {month}{!isThisYear ? ` ${year}` : ''}
+      </h1>
+    </div>
+
+    <a
+      href={`/day/${iso(next)}`}
+      class="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-border bg-elevated text-muted transition hover:text-fg"
+      aria-label="Día siguiente"
+    >
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6" /></svg>
+    </a>
+  </div>
+
+  {setCount > 0 ? (
+    <div class="grid grid-cols-3 border-t border-border">
+      <div class="border-r border-border px-3 py-3 text-center">
+        <div class="text-xl font-semibold tabular-nums tracking-tight">{exerciseCount}</div>
+        <div class="text-[10px] font-medium uppercase tracking-wider text-muted">ejercicios</div>
+      </div>
+      <div class="border-r border-border px-3 py-3 text-center">
+        <div class="text-xl font-semibold tabular-nums tracking-tight">{setCount}</div>
+        <div class="text-[10px] font-medium uppercase tracking-wider text-muted">sets</div>
+      </div>
+      <div class="px-3 py-3 text-center">
+        <div class="text-xl font-semibold tabular-nums tracking-tight">
+          {Math.round(volume).toLocaleString('es-ES')}<span class="ml-0.5 text-xs font-medium text-muted">kg</span>
+        </div>
+        <div class="text-[10px] font-medium uppercase tracking-wider text-muted">volumen</div>
+      </div>
+    </div>
+  ) : (
+    <div class="border-t border-border px-4 py-3 text-center text-xs text-muted">
+      {isToday ? 'Empieza tu entreno abajo' : 'Sin entreno este día'}
+    </div>
+  )}
+
+  {!isToday && (
+    <a href="/" class="block border-t border-border bg-elevated/40 px-4 py-2 text-center text-[11px] font-medium text-accent transition hover:bg-elevated">
+      ← volver a hoy
+    </a>
+  )}
+</section>

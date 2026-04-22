@@ -1,0 +1,37 @@
+{
+  "name": "gymlog",
+  "type": "module",
+  "version": "0.0.1",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "astro": "astro",
+    "db:migrate": "tsx scripts/migrate.ts",
+    "db:import": "tsx scripts/import-fitnotes.ts"
+  },
+  "dependencies": {
+    "@astrojs/react": "^5.0.3",
+    "@astrojs/vercel": "^10.0.5",
+    "@fontsource/inter": "^5.2.8",
+    "@libsql/client": "^0.17.2",
+    "@resvg/resvg-js": "^2.6.2",
+    "@tailwindcss/vite": "^4.2.4",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "astro": "^6.1.8",
+    "clsx": "^2.1.1",
+    "date-fns": "^4.1.0",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "recharts": "^3.8.1",
+    "satori": "^0.26.0",
+    "tailwindcss": "^4.2.4"
+  },
+  "devDependencies": {
+    "tsx": "^4.21.0"
+  }
+}

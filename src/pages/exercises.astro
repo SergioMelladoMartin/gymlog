@@ -1,0 +1,17 @@
+---
+import Layout from '../layouts/Layout.astro';
+import ExerciseList from '../components/ExerciseList';
+import { getExercises, getCategories } from '../lib/queries';
+
+export const prerender = false;
+
+const [exercises, categories] = await Promise.all([getExercises(), getCategories()]);
+---
+<Layout title="Ejercicios · gymlog" activeNav="exercises">
+  <div class="mb-5">
+    <div class="text-xs font-medium uppercase tracking-wider text-muted">Catálogo</div>
+    <h1 class="text-3xl font-semibold tracking-tight">Ejercicios</h1>
+  </div>
+
+  <ExerciseList client:load exercises={exercises} categories={categories} />
+</Layout>

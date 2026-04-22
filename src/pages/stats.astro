@@ -1,0 +1,263 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { db } from '../lib/db';
+
+export const prerender = false;
+
+type Range = 'all' | '7d' | '30d' | '90d' | '365d' | 'year' | 'month';
+
+const url = Astro.url;
+const range = (url.searchParams.get('range') ?? 'all') as Range;
+const year = Number(url.searchParams.get('year') ?? new Date().getFullYear());
+const month = Number(url.searchParams.get('month') ?? new Date().getMonth() + 1);
+
+// Returns two parallel WHERE clauses — one assumes the column is called `date`
+// (single-table queries), the other uses `ts.date` (joined queries). Keeping
+// them explicit avoids fragile string substitution.
+function rangeFilter() {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const build = (exprDate: string, exprTsDate: string, args: (string | number)[], label: string) =>
+    ({ where: `WHERE ${exprDate}`, whereTs: `WHERE ${exprTsDate}`, args, label });
+  switch (range) {
+    case '7d':
+      return build("date >= date('now', '-7 days')", "ts.date >= date('now', '-7 days')", [], 'Últimos 7 días');
+    case '30d':
+      return build("date >= date('now', '-30 days')", "ts.date >= date('now', '-30 days')", [], 'Últimos 30 días');
+    case '90d':
+      return build("date >= date('now', '-90 days')", "ts.date >= date('now', '-90 days')", [], 'Últimos 90 días');
+    case '365d':
+      return build("date >= date('now', '-365 days')", "ts.date >= date('now', '-365 days')", [], 'Últimos 12 meses');
+    case 'year':
+      return build('date >= ? AND date <= ?', 'ts.date >= ? AND ts.date <= ?',
+        [`${year}-01-01`, `${year}-12-31`],
+        year === new Date().getFullYear() ? 'Año en curso' : `Año ${year}`);
+    case 'month':
+      return build('date >= ? AND date <= ?', 'ts.date >= ? AND ts.date <= ?',
+        [`${year}-${pad(month)}-01`, `${year}-${pad(month)}-${pad(new Date(year, month, 0).getDate())}`],
+        new Date(year, month - 1, 1).toLocaleDateString('es-ES', { month: 'long', year: 'numeric' }));
+    default:
+      return { where: '', whereTs: '', args: [] as (string | number)[], label: 'Todo el histórico' };
+  }
+}
+
+const filter = rangeFilter();
+
+const totalsRes = await db.execute({
+  sql: `SELECT COUNT(*)                       AS total_sets,
+               COUNT(DISTINCT date)           AS total_days,
+               COUNT(DISTINCT exercise_id)    AS total_exercises,
+               SUM(weight_kg * reps)          AS total_volume,
+               MIN(date)                      AS first_day,
+               MAX(date)                      AS last_day
+        FROM training_set ${filter.where}`,
+  args: filter.args,
+});
+const totals = totalsRes.rows[0] as unknown as {
+  total_sets: number; total_days: number; total_exercises: number; total_volume: number;
+  first_day: string | null; last_day: string | null;
+};
+
+const perCategoryRes = await db.execute({
+  sql: `SELECT c.id, c.name, c.color,
+               COUNT(*)                           AS set_count,
+               SUM(ts.weight_kg * ts.reps)        AS volume,
+               COUNT(DISTINCT ts.date)            AS day_count
+        FROM training_set ts
+        JOIN exercise e ON e.id = ts.exercise_id
+        JOIN category c ON c.id = e.category_id
+        ${filter.whereTs}
+        GROUP BY c.id
+        ORDER BY volume DESC`,
+  args: filter.args,
+});
+const perCategory = perCategoryRes.rows as unknown as Array<{
+  id: number; name: string; color: string | null; set_count: number; volume: number; day_count: number;
+}>;
+const maxVolume = perCategory.reduce((acc, c) => Math.max(acc, c.volume ?? 0), 0);
+
+const topExercisesRes = await db.execute({
+  sql: `SELECT e.id, e.name, c.color AS color, COUNT(*) AS set_count
+        FROM training_set ts
+        JOIN exercise e ON e.id = ts.exercise_id
+        JOIN category c ON c.id = e.category_id
+        ${filter.whereTs}
+        GROUP BY e.id
+        ORDER BY set_count DESC
+        LIMIT 10`,
+  args: filter.args,
+});
+const topExercises = topExercisesRes.rows as unknown as Array<{
+  id: number; name: string; color: string | null; set_count: number;
+}>;
+
+// Weekly distribution across selected range
+const weekdayRes = await db.execute({
+  sql: `SELECT CAST(strftime('%w', date) AS INTEGER) AS dow, COUNT(DISTINCT date) AS c
+        FROM training_set ${filter.where}
+        GROUP BY dow`,
+  args: filter.args,
+});
+const weekdayMap = new Map<number, number>();
+for (const row of weekdayRes.rows as unknown as Array<{ dow: number; c: number }>) {
+  weekdayMap.set(row.dow, row.c);
+}
+// Reorder to Mon..Sun
+const weekdayData = [1, 2, 3, 4, 5, 6, 0].map((d) => weekdayMap.get(d) ?? 0);
+const weekdayMax = Math.max(1, ...weekdayData);
+
+const fmt = (n: number) => Math.round(n).toLocaleString('es-ES');
+
+const currentYear = new Date().getFullYear();
+// Range chips
+const chips: Array<{ id: Range; label: string; href: string; match: boolean }> = [
+  { id: '7d',   label: '7d',   href: '/stats?range=7d',  match: range === '7d' },
+  { id: '30d',  label: '30d',  href: '/stats?range=30d', match: range === '30d' },
+  { id: '90d',  label: '90d',  href: '/stats?range=90d', match: range === '90d' },
+  { id: '365d', label: '1a',   href: '/stats?range=365d', match: range === '365d' },
+  { id: 'year', label: 'YTD',  href: `/stats?range=year&year=${currentYear}`,
+    match: range === 'year' && year === currentYear },
+  { id: 'all',  label: 'Todo', href: '/stats', match: range === 'all' },
+];
+---
+<Layout title="Stats · gymlog" activeNav="stats">
+  <div class="mb-4">
+    <div class="text-xs font-medium uppercase tracking-wider text-muted">Resumen</div>
+    <h1 class="text-3xl font-semibold tracking-tight">Estadísticas</h1>
+    <div class="mt-1 text-sm capitalize text-muted">{filter.label}</div>
+  </div>
+
+  <div class="no-scrollbar mb-5 -mx-1 flex gap-1.5 overflow-x-auto px-1">
+    {chips.map((c) => (
+      <a href={c.href} class={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition ${c.match ? 'bg-accent text-ink' : 'bg-card text-muted hover:text-fg'}`}>
+        {c.label}
+      </a>
+    ))}
+  </div>
+
+  <div class="mb-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
+    <div class="stat-tile">
+      <div class="section-title flex items-center gap-1.5">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="4" rx="2" /><path d="M16 2v4" /><path d="M8 2v4" /><path d="M3 10h18" /></svg>
+        Días
+      </div>
+      <div class="mt-0.5 text-2xl font-semibold tabular-nums tracking-tight">{totals.total_days ?? 0}</div>
+    </div>
+    <div class="stat-tile">
+      <div class="section-title flex items-center gap-1.5">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18" /><path d="m7 14 4-4 4 4 5-5" /></svg>
+        Sets
+      </div>
+      <div class="mt-0.5 text-2xl font-semibold tabular-nums tracking-tight">{fmt(totals.total_sets ?? 0)}</div>
+    </div>
+    <div class="stat-tile">
+      <div class="section-title flex items-center gap-1.5">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6.5 6.5 11 11" /><path d="m21 21-1-1" /><path d="m3 3 1 1" /><path d="m18 22 4-4" /><path d="m2 6 4-4" /><path d="m3 10 7-7" /><path d="m14 21 7-7" /></svg>
+        Ejercicios
+      </div>
+      <div class="mt-0.5 text-2xl font-semibold tabular-nums tracking-tight">{totals.total_exercises ?? 0}</div>
+    </div>
+    <div class="stat-tile">
+      <div class="section-title flex items-center gap-1.5">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v18h14" /><path d="M7 12h3" /><path d="M7 18h6" /></svg>
+        Volumen
+      </div>
+      <div class="mt-0.5 text-2xl font-semibold tabular-nums tracking-tight">
+        {Math.round((totals.total_volume ?? 0) / 1000)}<span class="ml-1 text-sm font-medium text-muted">k kg</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card mb-5 p-4">
+    <div class="section-title mb-3 flex items-center gap-1.5">
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="4" rx="2" /><path d="M16 2v4" /><path d="M8 2v4" /><path d="M3 10h18" /></svg>
+      Distribución semanal
+    </div>
+
+    {/* Mobile: horizontal bars, one row per day — easier to read on narrow screens */}
+    <ul class="flex flex-col gap-2 sm:hidden">
+      {['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'].map((label, i) => {
+        const val = weekdayData[i];
+        const pct = weekdayMax ? (val / weekdayMax) * 100 : 0;
+        return (
+          <li class="flex items-center gap-3">
+            <span class="w-20 shrink-0 text-xs font-medium text-muted">{label}</span>
+            <div class="relative h-6 flex-1 overflow-hidden rounded-md bg-elevated">
+              <div class="h-full rounded-md bg-accent transition" style={`width:${pct}%;opacity:${val ? (0.45 + 0.55 * (val / weekdayMax)) : 0.25}`} />
+            </div>
+            <span class="w-8 shrink-0 text-right text-sm font-semibold tabular-nums">{val}</span>
+          </li>
+        );
+      })}
+    </ul>
+
+    {/* Desktop: vertical bars */}
+    <div class="hidden items-end gap-2 sm:flex">
+      {['L','M','X','J','V','S','D'].map((label, i) => {
+        const val = weekdayData[i];
+        const h = Math.max(4, (val / weekdayMax) * 72);
+        return (
+          <div class="flex flex-1 flex-col items-center gap-1.5">
+            <div class="flex h-20 w-full items-end">
+              <div class="w-full rounded-t bg-accent transition" style={`height:${h}px;opacity:${val ? (0.35 + 0.65 * (val / weekdayMax)) : 0.15}`} />
+            </div>
+            <div class="text-[10px] font-medium uppercase tracking-wider text-muted">{label}</div>
+            <div class="text-[11px] tabular-nums text-fg">{val}</div>
+          </div>
+        );
+      })}
+    </div>
+  </div>
+
+  <div class="card mb-5 p-4">
+    <div class="section-title mb-3 flex items-center gap-1.5">
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /><path d="M12 2v10l6 3" /></svg>
+      Volumen por categoría
+    </div>
+    {perCategory.length === 0 ? (
+      <div class="py-6 text-center text-sm text-muted">Sin datos en este periodo.</div>
+    ) : (
+      <ul class="flex flex-col gap-3">
+        {perCategory.map((c) => (
+          <li>
+            <div class="flex items-baseline justify-between text-sm">
+              <span class="flex items-center gap-2">
+                <span class="h-2 w-2 rounded-full" style={`background:${c.color ?? '#888'}`} />
+                <span class="font-medium">{c.name}</span>
+              </span>
+              <span class="tabular-nums text-muted">{fmt(c.volume)} kg · {c.set_count} sets</span>
+            </div>
+            <div class="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-elevated">
+              <div class="h-full rounded-full transition-all"
+                style={`width:${maxVolume ? (c.volume / maxVolume) * 100 : 0}%;background:${c.color ?? '#888'};box-shadow:0 0 8px ${c.color ?? 'transparent'}55`} />
+            </div>
+          </li>
+        ))}
+      </ul>
+    )}
+  </div>
+
+  <div class="card p-4">
+    <div class="section-title mb-2 flex items-center gap-1.5">
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6" /><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18" /><path d="M4 22h16" /><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22" /><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22" /><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z" /></svg>
+      Top 10 ejercicios
+    </div>
+    {topExercises.length === 0 ? (
+      <div class="py-6 text-center text-sm text-muted">Sin datos.</div>
+    ) : (
+      <ul class="divide-y divide-border">
+        {topExercises.map((e, idx) => (
+          <li>
+            <a href={`/exercise/${e.id}`} class="-mx-2 flex items-center justify-between gap-3 rounded-md px-2 py-2.5 text-sm transition hover:bg-elevated">
+              <span class="flex min-w-0 items-center gap-3">
+                <span class="w-5 shrink-0 text-right text-xs tabular-nums text-muted">{idx + 1}</span>
+                <span class="h-1.5 w-1.5 shrink-0 rounded-full" style={`background:${e.color ?? '#888'}`} />
+                <span class="truncate">{e.name}</span>
+              </span>
+              <span class="shrink-0 tabular-nums text-muted">{e.set_count}</span>
+            </a>
+          </li>
+        ))}
+      </ul>
+    )}
+  </div>
+</Layout>

@@ -1,0 +1,85 @@
+---
+import '../styles/global.css';
+import ThemeToggle from '../components/ThemeToggle';
+
+interface Props {
+  title?: string;
+  activeNav?: 'today' | 'calendar' | 'diary' | 'stats' | 'exercises';
+}
+
+const { title = 'gymlog', activeNav } = Astro.props;
+
+const links: Array<{ key: NonNullable<Props['activeNav']>; href: string; label: string }> = [
+  { key: 'today',     href: '/',           label: 'Hoy' },
+  { key: 'calendar',  href: '/calendar',   label: 'Calendario' },
+  { key: 'diary',     href: '/diary',      label: 'Diario' },
+  { key: 'exercises', href: '/exercises',  label: 'Ejercicios' },
+  { key: 'stats',     href: '/stats',      label: 'Stats' },
+];
+---
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0b0b0f" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://rsms.me/" />
+    <link rel="stylesheet" href="https://rsms.me/inter/inter.css" />
+    <title>{title}</title>
+    <script is:inline>
+      (function () {
+        try {
+          var stored = localStorage.getItem('theme');
+          var sysDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          var theme = stored || (sysDark ? 'dark' : 'light');
+          document.documentElement.setAttribute('data-theme', theme);
+        } catch (e) {
+          document.documentElement.setAttribute('data-theme', 'dark');
+        }
+      })();
+    </script>
+  </head>
+  <body class="min-h-dvh">
+    <header class="sticky top-0 z-40 border-b border-border/70 backdrop-blur-xl" style="background: color-mix(in srgb, var(--color-bg) 75%, transparent);">
+      <div class="mx-auto flex max-w-3xl items-center gap-3 px-4 py-3">
+        <a href="/" class="flex shrink-0 items-center gap-2 font-semibold tracking-tight">
+          <span class="grid h-8 w-8 place-items-center rounded-lg bg-accent text-ink">
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14.4 14.4 9.6 9.6" />
+              <path d="M18.657 21.485a2 2 0 1 1-2.829-2.828l-1.767 1.768a2 2 0 1 1-2.829-2.829l6.364-6.364a2 2 0 1 1 2.829 2.829l-1.768 1.767a2 2 0 1 1 2.828 2.829z" />
+              <path d="m21.5 21.5-1.4-1.4" />
+              <path d="M3.9 3.9 2.5 2.5" />
+              <path d="M6.404 12.768a2 2 0 1 1-2.829-2.829l1.768-1.767a2 2 0 1 1-2.828-2.829l2.828-2.828a2 2 0 1 1 2.829 2.828l1.767-1.768a2 2 0 1 1 2.829 2.829z" />
+            </svg>
+          </span>
+          <span class="text-[15px]">gymlog</span>
+        </a>
+
+        <nav class="no-scrollbar -mx-1 flex min-w-0 flex-1 gap-1 overflow-x-auto px-1">
+          {links.map((l) => {
+            const active = activeNav === l.key;
+            return (
+              <a
+                href={l.href}
+                aria-current={active ? 'page' : undefined}
+                class={`shrink-0 rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+                  active
+                    ? 'bg-elevated text-fg ring-1 ring-strong'
+                    : 'text-muted hover:bg-card hover:text-fg'
+                }`}
+              >
+                {l.label}
+              </a>
+            );
+          })}
+        </nav>
+
+        <ThemeToggle client:load />
+      </div>
+    </header>
+
+    <main class="mx-auto max-w-3xl px-4 py-6">
+      <slot />
+    </main>
+  </body>
+</html>
