@@ -75,17 +75,29 @@ const redirect = Astro.url.searchParams.get('r') ?? '/';
         btn.disabled = true;
         btn.textContent = 'Entrando…';
         const fd = new FormData(form);
-        const res = await fetch('/api/auth/sign-in/email', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ email: fd.get('email'), password: fd.get('password') }),
-        });
-        if (res.ok) {
-          window.location.href = redirect;
-        } else {
-          const data = await res.json().catch(() => ({}));
-          errBox.textContent = data.message || 'Email o contraseña incorrectos.';
+        try {
+          const res = await fetch('/api/auth/sign-in/email', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ email: fd.get('email'), password: fd.get('password') }),
+          });
+          const raw = await res.text();
+          if (res.ok) { window.location.href = redirect; return; }
+          let msg = `Error ${res.status}`;
+          try {
+            const data = JSON.parse(raw);
+            if (data?.message) msg = data.message;
+            else if (data?.error) msg = typeof data.error === 'string' ? data.error : JSON.stringify(data.error);
+            else if (data?.code) msg = data.code;
+          } catch {
+            if (raw) msg = raw.slice(0, 200);
+          }
+          errBox.textContent = msg;
           errBox.classList.remove('hidden');
+        } catch (err) {
+          errBox.textContent = 'Error de red: ' + (err?.message || err);
+          errBox.classList.remove('hidden');
+        } finally {
           btn.disabled = false;
           btn.textContent = 'Entrar';
         }

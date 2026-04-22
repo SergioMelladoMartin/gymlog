@@ -79,23 +79,37 @@ const redirect = Astro.url.searchParams.get('r') ?? '/';
         btn.disabled = true;
         btn.textContent = 'Creando…';
         const fd = new FormData(form);
-        const res = await fetch('/api/auth/sign-up/email', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            name: fd.get('name'),
-            email: fd.get('email'),
-            password: fd.get('password'),
-          }),
-        });
-        if (res.ok) {
-          // Tell the server we want to claim orphan data (first-user bootstrap).
-          await fetch('/api/claim-owner', { method: 'POST' });
-          window.location.href = redirect;
-        } else {
-          const data = await res.json().catch(() => ({}));
-          errBox.textContent = data.message || 'No se pudo crear la cuenta.';
+        try {
+          const res = await fetch('/api/auth/sign-up/email', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              name: fd.get('name'),
+              email: fd.get('email'),
+              password: fd.get('password'),
+            }),
+          });
+          const raw = await res.text();
+          if (res.ok) {
+            await fetch('/api/claim-owner', { method: 'POST' });
+            window.location.href = redirect;
+            return;
+          }
+          let msg = `Error ${res.status}`;
+          try {
+            const data = JSON.parse(raw);
+            if (data?.message) msg = data.message;
+            else if (data?.error) msg = typeof data.error === 'string' ? data.error : JSON.stringify(data.error);
+            else if (data?.code) msg = data.code;
+          } catch {
+            if (raw) msg = raw.slice(0, 200);
+          }
+          errBox.textContent = msg;
           errBox.classList.remove('hidden');
+        } catch (err) {
+          errBox.textContent = 'Error de red: ' + (err?.message || err);
+          errBox.classList.remove('hidden');
+        } finally {
           btn.disabled = false;
           btn.textContent = 'Crear cuenta';
         }
