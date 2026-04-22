@@ -1,15 +1,15 @@
 import { betterAuth } from 'better-auth';
 import { LibsqlDialect } from '@libsql/kysely-libsql';
+import { db } from './db';
 
-const url =
-  import.meta.env?.TURSO_DATABASE_URL ??
-  process.env.TURSO_DATABASE_URL ??
-  'file:data/gymlog.db';
-const authToken = import.meta.env?.TURSO_AUTH_TOKEN ?? process.env.TURSO_AUTH_TOKEN;
 const secret =
   import.meta.env?.BETTER_AUTH_SECRET ?? process.env.BETTER_AUTH_SECRET;
 
-// Prefer explicit config; otherwise infer from Vercel's system env.
+if (!secret) {
+  // Log loudly — auth calls will fail with 500 otherwise.
+  console.error('⚠️  BETTER_AUTH_SECRET is not set. Auth endpoints will fail.');
+}
+
 const vercelUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : undefined;
 const vercelProdUrl = process.env.VERCEL_PROJECT_PRODUCTION_URL
   ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
@@ -22,8 +22,6 @@ const baseURL =
   vercelUrl ??
   'http://localhost:4321';
 
-// Allow current deployment's host + explicit prod URL + localhost to submit
-// auth requests. Prevents Better-Auth from rejecting Vercel preview URLs.
 const trustedOrigins = Array.from(
   new Set(
     [baseURL, vercelUrl, vercelProdUrl, 'http://localhost:4321', 'http://localhost:3000'].filter(
@@ -33,11 +31,14 @@ const trustedOrigins = Array.from(
 );
 
 export const auth = betterAuth({
-  secret,
+  secret: secret ?? 'insecure-dev-only-please-set-BETTER_AUTH_SECRET',
   baseURL,
   trustedOrigins,
   database: {
-    dialect: new LibsqlDialect({ url, authToken }),
+    // Reuse the same @libsql/client instance exported from ./db so Vercel
+    // bundles only one copy of the native module and all queries share a
+    // single HTTP/2 connection to Turso.
+    dialect: new LibsqlDialect({ client: db as any }),
     type: 'sqlite',
   },
   emailAndPassword: {
