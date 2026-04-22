@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 type NavKey = 'today' | 'calendar' | 'diary' | 'stats' | 'exercises';
 
@@ -60,8 +61,10 @@ const ITEMS: Item[] = [
 export default function SideNav({ active, userName, userEmail }: Props) {
   const [open, setOpen] = useState(false);
   const [theme, setTheme] = useState<'light' | 'dark'>('dark');
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    setMounted(true);
     const t = (document.documentElement.getAttribute('data-theme') as 'light' | 'dark') || 'dark';
     setTheme(t);
   }, []);
@@ -97,40 +100,45 @@ export default function SideNav({ active, userName, userEmail }: Props) {
 
   const initial = (userName || userEmail || '?').trim().charAt(0).toUpperCase();
 
-  return (
+  const drawerStyle: React.CSSProperties = {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    height: '100dvh',
+    width: 'min(320px, 85vw)',
+    background: 'var(--color-card)',
+    borderRight: '1px solid var(--color-border)',
+    boxShadow: '0 10px 40px -8px rgba(0, 0, 0, 0.55)',
+    transform: open ? 'translateX(0)' : 'translateX(-100%)',
+    transition: 'transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1)',
+    display: 'flex',
+    flexDirection: 'column',
+    zIndex: 60,
+  };
+
+  const backdropStyle: React.CSSProperties = {
+    position: 'fixed',
+    inset: 0,
+    background: 'rgba(0, 0, 0, 0.5)',
+    backdropFilter: 'blur(4px)',
+    WebkitBackdropFilter: 'blur(4px)',
+    zIndex: 55,
+    opacity: open ? 1 : 0,
+    pointerEvents: open ? 'auto' : 'none',
+    transition: 'opacity 200ms ease-out',
+  };
+
+  const drawerOverlay = (
     <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="grid h-9 w-9 place-items-center rounded-lg border border-border bg-card text-fg transition hover:bg-elevated"
-        aria-label="Abrir menú"
-      >
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <line x1="4" x2="20" y1="6" y2="6" />
-          <line x1="4" x2="20" y1="12" y2="12" />
-          <line x1="4" x2="20" y1="18" y2="18" />
-        </svg>
-      </button>
+      <div style={backdropStyle} onClick={() => setOpen(false)} aria-hidden="true" />
 
-      {/* Backdrop */}
-      <div
-        className={`fixed inset-0 z-40 bg-black/50 backdrop-blur-sm transition-opacity ${
-          open ? 'opacity-100' : 'pointer-events-none opacity-0'
-        }`}
-        onClick={() => setOpen(false)}
-        aria-hidden="true"
-      />
-
-      {/* Drawer */}
-      <aside
-        className={`fixed inset-y-0 left-0 z-50 flex w-[85vw] max-w-xs flex-col border-r border-border bg-card shadow-2xl transition-transform duration-200 ease-out ${
-          open ? 'translate-x-0' : '-translate-x-full'
-        }`}
-        aria-hidden={!open}
-      >
-        {/* Header of drawer */}
-        <div className="flex items-center justify-between border-b border-border px-4 py-4">
-          <a href="/" className="flex items-center gap-2 font-semibold tracking-tight" onClick={() => setOpen(false)}>
+      <aside style={drawerStyle} aria-hidden={!open}>
+        <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-4">
+          <a
+            href="/"
+            className="flex items-center gap-2 font-semibold tracking-tight"
+            onClick={() => setOpen(false)}
+          >
             <span className="grid h-8 w-8 place-items-center rounded-lg bg-accent text-ink">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M14.4 14.4 9.6 9.6" />
@@ -152,8 +160,7 @@ export default function SideNav({ active, userName, userEmail }: Props) {
           </button>
         </div>
 
-        {/* Nav */}
-        <nav className="flex flex-1 flex-col gap-1 overflow-y-auto p-3">
+        <nav className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-3">
           {ITEMS.map((item) => {
             const isActive = item.key === active;
             return (
@@ -163,9 +170,7 @@ export default function SideNav({ active, userName, userEmail }: Props) {
                 onClick={() => setOpen(false)}
                 aria-current={isActive ? 'page' : undefined}
                 className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition ${
-                  isActive
-                    ? 'bg-accent text-ink'
-                    : 'text-fg hover:bg-elevated'
+                  isActive ? 'bg-accent text-ink' : 'text-fg hover:bg-elevated'
                 }`}
               >
                 <span className={isActive ? '' : 'text-muted'}>{item.icon}</span>
@@ -175,8 +180,7 @@ export default function SideNav({ active, userName, userEmail }: Props) {
           })}
         </nav>
 
-        {/* Footer: user + theme + logout */}
-        <div className="border-t border-border p-3">
+        <div className="shrink-0 border-t border-border p-3">
           <div className="mb-2 flex items-center gap-2.5 rounded-lg bg-elevated/60 px-3 py-2">
             <span className="grid h-8 w-8 place-items-center rounded-full bg-accent text-sm font-bold text-ink">{initial}</span>
             <div className="min-w-0 flex-1">
@@ -217,6 +221,26 @@ export default function SideNav({ active, userName, userEmail }: Props) {
           </button>
         </div>
       </aside>
+    </>
+  );
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="grid h-9 w-9 place-items-center rounded-lg border border-border bg-card text-fg transition hover:bg-elevated"
+        aria-label="Abrir menú"
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <line x1="4" x2="20" y1="6" y2="6" />
+          <line x1="4" x2="20" y1="12" y2="12" />
+          <line x1="4" x2="20" y1="18" y2="18" />
+        </svg>
+      </button>
+      {/* Render drawer at <body> so the header's backdrop-filter doesn't
+          trap the fixed positioning inside a stacking context. */}
+      {mounted ? createPortal(drawerOverlay, document.body) : null}
     </>
   );
 }
