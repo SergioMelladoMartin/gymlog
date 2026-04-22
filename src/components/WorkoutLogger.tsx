@@ -401,24 +401,6 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
         />
       </section>
 
-      {sets.length > 0 && (
-        <div className="flex justify-center">
-          <a
-            href={`/api/export/day/${date}.png`}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-4 py-2 text-sm font-medium text-fg transition hover:border-strong hover:bg-elevated"
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
-              <polyline points="16 6 12 2 8 6" />
-              <line x1="12" x2="12" y1="2" y2="15" />
-            </svg>
-            Compartir entreno (PNG)
-          </a>
-        </div>
-      )}
-
       {pickerOpen && (
         <ExercisePicker
           exercises={exercises}
@@ -521,46 +503,80 @@ function ExercisePicker({
   onCreate: (name: string, categoryId: number) => Promise<Exercise | null>;
 }) {
   const [query, setQuery] = useState('');
-  const [catFilter, setCatFilter] = useState<number | null>(null);
+  const [stepCategory, setStepCategory] = useState<number | null>(null); // null = group index
   const [creatorOpen, setCreatorOpen] = useState(false);
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && (creatorOpen ? setCreatorOpen(false) : onClose());
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (creatorOpen) { setCreatorOpen(false); return; }
+      if (stepCategory !== null) { setStepCategory(null); return; }
+      if (query) { setQuery(''); return; }
+      onClose();
+    };
     window.addEventListener('keydown', onKey);
     document.body.style.overflow = 'hidden';
     return () => {
       window.removeEventListener('keydown', onKey);
       document.body.style.overflow = '';
     };
-  }, [onClose, creatorOpen]);
+  }, [onClose, creatorOpen, stepCategory, query]);
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return exercises.filter((e) => {
-      if (catFilter != null && e.category_id !== catFilter) return false;
-      if (q && !e.name.toLowerCase().includes(q)) return false;
-      return true;
-    });
-  }, [exercises, query, catFilter]);
+  const q = query.trim().toLowerCase();
+  const isSearching = q.length > 0;
 
-  const sorted = useMemo(() => {
-    return [...filtered].sort((a, b) => {
+  const countByCat = useMemo(() => {
+    const m = new Map<number, number>();
+    for (const e of exercises) m.set(e.category_id, (m.get(e.category_id) ?? 0) + 1);
+    return m;
+  }, [exercises]);
+
+  const lastUsedByCat = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const e of exercises) {
+      if (!e.last_used) continue;
+      const cur = m.get(e.category_id);
+      if (!cur || e.last_used > cur) m.set(e.category_id, e.last_used);
+    }
+    return m;
+  }, [exercises]);
+
+  // Exercises to render in the list view (search or category picked).
+  const visibleExercises = useMemo(() => {
+    let list = exercises;
+    if (stepCategory !== null) list = list.filter((e) => e.category_id === stepCategory);
+    if (isSearching) list = list.filter((e) => e.name.toLowerCase().includes(q));
+    return [...list].sort((a, b) => {
       if (a.last_used && b.last_used) return a.last_used < b.last_used ? 1 : -1;
       if (a.last_used) return -1;
       if (b.last_used) return 1;
       return a.name.localeCompare(b.name);
     });
-  }, [filtered]);
+  }, [exercises, stepCategory, q, isSearching]);
+
+  const activeCategory = stepCategory != null ? categories.find((c) => c.id === stepCategory) ?? null : null;
+  const showGroupsIndex = !isSearching && stepCategory === null;
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-bg/95 backdrop-blur-xl">
       <div className="mx-auto flex h-full w-full max-w-3xl flex-col px-4 pt-4 pb-2">
-        <div className="flex items-center gap-3">
+        {/* Top bar: back button (if inside group or searching) + search input + close */}
+        <div className="flex items-center gap-2">
+          {stepCategory !== null && (
+            <button
+              type="button"
+              onClick={() => { setStepCategory(null); setQuery(''); }}
+              className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-border bg-card text-muted transition hover:text-fg"
+              aria-label="Volver a grupos"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
+            </button>
+          )}
           <div className="relative flex-1">
             <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>
             <input
               autoFocus
-              placeholder="Buscar ejercicio…"
+              placeholder={activeCategory ? `Buscar en ${activeCategory.name}…` : 'Buscar ejercicio…'}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               className="w-full rounded-xl border border-border bg-elevated pl-9 pr-3 py-2.5 outline-none transition focus:border-accent/60"
@@ -575,40 +591,19 @@ function ExercisePicker({
           </button>
         </div>
 
-        <div className="no-scrollbar mt-3 -mx-1 flex shrink-0 gap-1.5 overflow-x-auto px-1">
-          <button
-            type="button"
-            onClick={() => setCatFilter(null)}
-            className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition ${
-              catFilter === null ? 'bg-accent text-ink' : 'bg-card text-muted hover:text-fg'
-            }`}
-          >
-            Todos
-          </button>
-          {categories.map((c) => {
-            const active = catFilter === c.id;
-            return (
-              <button
-                key={c.id}
-                type="button"
-                onClick={() => setCatFilter(c.id)}
-                className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition ${active ? 'text-fg' : 'text-muted hover:text-fg'}`}
-                style={{
-                  background: active ? `${c.color}33` : 'var(--color-card)',
-                  boxShadow: active ? `inset 0 0 0 1px ${c.color}66` : undefined,
-                }}
-              >
-                <span className="inline-block h-1.5 w-1.5 rounded-full align-middle mr-1.5" style={{ background: c.color ?? '#888' }} />
-                {c.name}
-              </button>
-            );
-          })}
-        </div>
+        {/* Step header when inside a group */}
+        {activeCategory && !isSearching && (
+          <div className="mt-3 flex items-center gap-2">
+            <span className="h-2.5 w-2.5 rounded-full" style={{ background: activeCategory.color ?? '#888' }} />
+            <h2 className="text-lg font-semibold tracking-tight">{activeCategory.name}</h2>
+            <span className="text-xs text-muted">· {countByCat.get(activeCategory.id) ?? 0} ejercicios</span>
+          </div>
+        )}
 
         {creatorOpen && (
           <CreateExerciseForm
             initialName={query}
-            initialCategoryId={catFilter ?? categories[0]?.id ?? null}
+            initialCategoryId={stepCategory ?? categories[0]?.id ?? null}
             categories={categories}
             onCancel={() => setCreatorOpen(false)}
             onCreate={async (name, cat) => {
@@ -621,39 +616,73 @@ function ExercisePicker({
           />
         )}
 
-        <ul className="mt-3 flex-1 overflow-y-auto rounded-xl border border-border bg-card/60 min-h-0">
-          {sorted.map((e) => (
-            <li key={e.id} className="border-b border-border last:border-b-0">
-              <button
-                type="button"
-                onClick={() => onSelect(e.id)}
-                className="flex w-full items-center justify-between px-4 py-3 text-left transition hover:bg-elevated"
-              >
-                <span className="flex min-w-0 items-center gap-2.5">
-                  <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: e.category_color ?? '#888' }} />
-                  <span className="truncate">{e.name}</span>
-                </span>
-                {e.last_used && <span className="shrink-0 text-xs text-muted">{relativeDate(e.last_used)}</span>}
-              </button>
-            </li>
-          ))}
-          {sorted.length === 0 && (
-            <li className="flex flex-col items-center justify-center gap-3 py-10 text-center text-sm text-muted">
-              <span>Sin resultados para "{query || 'tu búsqueda'}"</span>
-              <button
-                type="button"
-                onClick={() => setCreatorOpen(true)}
-                className="rounded-full bg-accent px-4 py-2 text-xs font-semibold text-ink transition hover:brightness-110"
-              >
-                + Crear "{query.trim() || 'nuevo ejercicio'}"
-              </button>
-            </li>
-          )}
-        </ul>
+        {/* Body: groups index OR exercise list */}
+        {showGroupsIndex ? (
+          <div className="mt-3 flex-1 overflow-y-auto">
+            <div className="mb-2 text-xs text-muted">Elige un grupo muscular</div>
+            <div className="grid grid-cols-2 gap-2">
+              {categories.map((c) => {
+                const n = countByCat.get(c.id) ?? 0;
+                const last = lastUsedByCat.get(c.id);
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => setStepCategory(c.id)}
+                    className="group flex items-center justify-between gap-2 rounded-xl border border-border bg-card p-3 text-left transition hover:border-strong hover:bg-elevated"
+                  >
+                    <div className="flex min-w-0 flex-col">
+                      <span className="flex items-center gap-2">
+                        <span className="h-2 w-2 rounded-full" style={{ background: c.color ?? '#888', boxShadow: `0 0 8px ${c.color}55` }} />
+                        <span className="truncate font-semibold">{c.name}</span>
+                      </span>
+                      <span className="mt-0.5 text-[11px] text-muted">
+                        {n} ejerc{last ? ` · ${relativeDate(last)}` : ''}
+                      </span>
+                    </div>
+                    <svg className="shrink-0 text-muted transition group-hover:text-fg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          <ul className="mt-3 flex-1 overflow-y-auto rounded-xl border border-border bg-card/60 min-h-0">
+            {visibleExercises.map((e) => (
+              <li key={e.id} className="border-b border-border last:border-b-0">
+                <button
+                  type="button"
+                  onClick={() => onSelect(e.id)}
+                  className="flex w-full items-center justify-between px-4 py-3 text-left transition hover:bg-elevated"
+                >
+                  <span className="flex min-w-0 items-center gap-2.5">
+                    <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: e.category_color ?? '#888' }} />
+                    <span className="truncate">{e.name}</span>
+                  </span>
+                  {e.last_used && <span className="shrink-0 text-xs text-muted">{relativeDate(e.last_used)}</span>}
+                </button>
+              </li>
+            ))}
+            {visibleExercises.length === 0 && (
+              <li className="flex flex-col items-center justify-center gap-3 py-10 text-center text-sm text-muted">
+                <span>{isSearching ? `Sin resultados para "${query}"` : 'Este grupo aún no tiene ejercicios'}</span>
+                <button
+                  type="button"
+                  onClick={() => setCreatorOpen(true)}
+                  className="rounded-full bg-accent px-4 py-2 text-xs font-semibold text-ink transition hover:brightness-110"
+                >
+                  + Crear {isSearching && query.trim() ? `"${query.trim()}"` : 'nuevo ejercicio'}
+                </button>
+              </li>
+            )}
+          </ul>
+        )}
 
-        <div className="mt-2 flex shrink-0 items-center justify-between">
-          <span className="text-[11px] text-muted">{sorted.length} resultado{sorted.length === 1 ? '' : 's'}</span>
-          {!creatorOpen && (
+        {!creatorOpen && !showGroupsIndex && (
+          <div className="mt-2 flex shrink-0 items-center justify-between">
+            <span className="text-[11px] text-muted">
+              {visibleExercises.length} resultado{visibleExercises.length === 1 ? '' : 's'}
+            </span>
             <button
               type="button"
               onClick={() => setCreatorOpen(true)}
@@ -662,8 +691,8 @@ function ExercisePicker({
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M12 5v14" /><path d="M5 12h14" /></svg>
               Crear ejercicio
             </button>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -710,8 +739,11 @@ function SetRow({
     );
   }
 
+  const isOptimistic = set.id < 0;
   return (
-    <li className="group flex items-center justify-between gap-3 px-4 py-2.5 text-sm transition hover:bg-elevated/40">
+    <li
+      className={`row-in group flex items-center justify-between gap-3 px-4 py-2.5 text-sm transition hover:bg-elevated/40 ${isOptimistic ? 'opacity-80' : ''}`}
+    >
       <button
         type="button"
         onClick={onStartEdit}
@@ -721,22 +753,22 @@ function SetRow({
           {index + 1}
         </span>
         {cardio ? (
-          <span className="flex items-baseline gap-2 tabular-nums">
-            <span className="text-lg font-semibold">{formatDuration(set.duration_seconds)}</span>
-            {set.distance_m > 0 && (
+          <span className="flex items-baseline tabular-nums">
+            <span className="w-16 text-right text-lg font-semibold">{formatDuration(set.duration_seconds)}</span>
+            {set.distance_m > 0 ? (
               <>
-                <span className="text-muted">·</span>
-                <span className="text-lg font-semibold">{formatDistance(set.distance_m)}</span>
+                <span className="mx-2 text-muted">·</span>
+                <span className="text-right text-lg font-semibold">{formatDistance(set.distance_m)}</span>
               </>
-            )}
+            ) : null}
           </span>
         ) : (
-          <span className="flex items-baseline gap-1 tabular-nums">
-            <span className="text-lg font-semibold">{formatKg(set.weight_kg)}</span>
-            <span className="text-[10px] uppercase tracking-wider text-muted">kg</span>
+          <span className="flex items-baseline tabular-nums">
+            <span className="w-14 text-right text-lg font-semibold">{formatKg(set.weight_kg)}</span>
+            <span className="ml-1 w-7 text-left text-[10px] uppercase tracking-wider text-muted">kg</span>
             <span className="mx-1 text-muted">·</span>
-            <span className="text-lg font-semibold">{set.reps}</span>
-            <span className="text-[10px] uppercase tracking-wider text-muted">reps</span>
+            <span className="w-8 text-right text-lg font-semibold">{set.reps}</span>
+            <span className="ml-1 text-[10px] uppercase tracking-wider text-muted">reps</span>
           </span>
         )}
         {!cardio && <PrBadges set={set} />}

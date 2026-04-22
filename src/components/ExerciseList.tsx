@@ -4,11 +4,13 @@ import type { Category, Exercise } from '../lib/queries';
 interface Props {
   exercises: Exercise[];
   categories: Category[];
+  initialCategory?: number | null;
+  initialQuery?: string;
 }
 
-export default function ExerciseList({ exercises, categories }: Props) {
-  const [query, setQuery] = useState('');
-  const [catFilter, setCatFilter] = useState<number | null>(null);
+export default function ExerciseList({ exercises, categories, initialCategory = null, initialQuery = '' }: Props) {
+  const [query, setQuery] = useState(initialQuery);
+  const [catFilter, setCatFilter] = useState<number | null>(initialCategory);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();

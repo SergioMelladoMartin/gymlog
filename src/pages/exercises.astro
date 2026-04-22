@@ -7,12 +7,79 @@ export const prerender = false;
 
 const user = Astro.locals.user!;
 const [exercises, categories] = await Promise.all([getExercises(user.id), getCategories()]);
+
+const url = Astro.url;
+const query = url.searchParams.get('q') ?? '';
+const groupParam = url.searchParams.get('group');
+const groupId = groupParam ? Number(groupParam) : null;
+
+// Count exercises per category
+const countByCat = new Map<number, number>();
+for (const e of exercises) countByCat.set(e.category_id, (countByCat.get(e.category_id) ?? 0) + 1);
+
+const activeCategory = groupId ? categories.find((c) => c.id === groupId) ?? null : null;
+const isSearching = query.trim().length > 0;
+const showGroupsIndex = !isSearching && groupId === null;
 ---
 <Layout title="Ejercicios · gymlog" activeNav="exercises">
-  <div class="mb-5">
-    <div class="text-xs font-medium uppercase tracking-wider text-muted">Catálogo</div>
-    <h1 class="text-3xl font-semibold tracking-tight">Ejercicios</h1>
+  <div class="mb-4">
+    {activeCategory ? (
+      <a href="/exercises" class="inline-flex items-center gap-1 text-sm text-muted transition hover:text-fg">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6" /></svg>
+        Grupos
+      </a>
+    ) : (
+      <div class="text-xs font-medium uppercase tracking-wider text-muted">Catálogo</div>
+    )}
+    <h1 class="text-3xl font-semibold tracking-tight">
+      {activeCategory ? (
+        <span class="flex items-center gap-2.5">
+          <span class="h-2.5 w-2.5 rounded-full" style={`background:${activeCategory.color ?? '#888'}`} />
+          {activeCategory.name}
+        </span>
+      ) : (
+        'Ejercicios'
+      )}
+    </h1>
   </div>
 
-  <ExerciseList client:load exercises={exercises} categories={categories} />
+  {showGroupsIndex ? (
+    <>
+      <div class="mb-3 text-xs text-muted">Elige un grupo muscular para ver sus ejercicios</div>
+      <div class="grid grid-cols-2 gap-2 sm:grid-cols-3">
+        {categories.map((c) => {
+          const n = countByCat.get(c.id) ?? 0;
+          return (
+            <a
+              href={`/exercises?group=${c.id}`}
+              class="group relative flex items-center justify-between gap-3 rounded-2xl border border-border bg-card p-4 transition hover:-translate-y-0.5 hover:border-strong hover:shadow-lg"
+            >
+              <div class="flex min-w-0 flex-col">
+                <span class="flex items-center gap-2">
+                  <span class="h-2.5 w-2.5 rounded-full" style={`background:${c.color ?? '#888'};box-shadow:0 0 10px ${c.color ?? '#888'}55`} />
+                  <span class="truncate font-semibold">{c.name}</span>
+                </span>
+                <span class="mt-1 text-xs text-muted">{n} ejercicio{n === 1 ? '' : 's'}</span>
+              </div>
+              <svg class="shrink-0 text-muted transition group-hover:text-fg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6" /></svg>
+            </a>
+          );
+        })}
+      </div>
+
+      <div class="mt-6">
+        <a href="/exercises?q=_all" class="block rounded-xl border border-dashed border-border bg-card/50 p-3 text-center text-sm text-muted transition hover:bg-card hover:text-fg">
+          Ver todos los ejercicios ({exercises.length})
+        </a>
+      </div>
+    </>
+  ) : (
+    <ExerciseList
+      client:load
+      exercises={exercises}
+      categories={categories}
+      initialCategory={groupId ?? null}
+      initialQuery={query === '_all' ? '' : query}
+    />
+  )}
 </Layout>

@@ -16,11 +16,9 @@
   "dependencies": {
     "@astrojs/react": "^5.0.3",
     "@astrojs/vercel": "^10.0.5",
-    "@fontsource/inter": "^5.2.8",
     "@libsql/client": "^0.17.2",
     "@libsql/core": "^0.17.2",
     "@libsql/kysely-libsql": "^0.4.1",
-    "@resvg/resvg-js": "^2.6.2",
     "@tailwindcss/vite": "^4.2.4",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
@@ -33,7 +31,6 @@
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "recharts": "^3.8.1",
-    "satori": "^0.26.0",
     "tailwindcss": "^4.2.4"
   },
   "devDependencies": {
