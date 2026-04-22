@@ -1,23 +1,23 @@
 ---
 import '../styles/global.css';
 import { ClientRouter } from 'astro:transitions';
-import UserMenu from '../components/UserMenu';
+import SideNav from '../components/SideNav';
 
 interface Props {
   title?: string;
   activeNav?: 'today' | 'calendar' | 'diary' | 'stats' | 'exercises';
 }
 
-const { title = 'gymlog', activeNav } = Astro.props;
+const { title = 'gymlog', activeNav = 'today' } = Astro.props;
 const user = Astro.locals.user;
 
-const links: Array<{ key: NonNullable<Props['activeNav']>; href: string; label: string }> = [
-  { key: 'today',     href: '/',           label: 'Hoy' },
-  { key: 'calendar',  href: '/calendar',   label: 'Calendario' },
-  { key: 'diary',     href: '/diary',      label: 'Diario' },
-  { key: 'exercises', href: '/exercises',  label: 'Ejercicios' },
-  { key: 'stats',     href: '/stats',      label: 'Stats' },
-];
+const navTitle = {
+  today: 'Hoy',
+  calendar: 'Calendario',
+  diary: 'Diario',
+  exercises: 'Ejercicios',
+  stats: 'Estadísticas',
+}[activeNav];
 ---
 <html lang="es">
   <head>
@@ -43,10 +43,12 @@ const links: Array<{ key: NonNullable<Props['activeNav']>; href: string; label: 
     </script>
   </head>
   <body class="min-h-dvh">
-    <header class="sticky top-0 z-40 border-b border-border/70 backdrop-blur-xl" style="background: color-mix(in srgb, var(--color-bg) 75%, transparent);">
+    <header class="sticky top-0 z-30 border-b border-border/70 backdrop-blur-xl" style="background: color-mix(in srgb, var(--color-bg) 75%, transparent);">
       <div class="mx-auto flex max-w-3xl items-center gap-3 px-4 py-3">
-        <a href="/" class="flex shrink-0 items-center gap-2 font-semibold tracking-tight">
-          <span class="grid h-8 w-8 place-items-center rounded-lg bg-accent text-ink">
+        {user && <SideNav client:load active={activeNav} userName={user.name} userEmail={user.email} />}
+
+        <div class="flex min-w-0 flex-1 items-center gap-2">
+          <a href="/" class="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-accent text-ink" aria-label="Ir a Hoy">
             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
               <path d="M14.4 14.4 9.6 9.6" />
               <path d="M18.657 21.485a2 2 0 1 1-2.829-2.828l-1.767 1.768a2 2 0 1 1-2.829-2.829l6.364-6.364a2 2 0 1 1 2.829 2.829l-1.768 1.767a2 2 0 1 1 2.828 2.829z" />
@@ -54,30 +56,9 @@ const links: Array<{ key: NonNullable<Props['activeNav']>; href: string; label: 
               <path d="M3.9 3.9 2.5 2.5" />
               <path d="M6.404 12.768a2 2 0 1 1-2.829-2.829l1.768-1.767a2 2 0 1 1-2.828-2.829l2.828-2.828a2 2 0 1 1 2.829 2.828l1.767-1.768a2 2 0 1 1 2.829 2.829z" />
             </svg>
-          </span>
-          <span class="text-[15px]">gymlog</span>
-        </a>
-
-        <nav class="no-scrollbar -mx-1 flex min-w-0 flex-1 gap-1 overflow-x-auto px-1">
-          {links.map((l) => {
-            const active = activeNav === l.key;
-            return (
-              <a
-                href={l.href}
-                aria-current={active ? 'page' : undefined}
-                class={`shrink-0 rounded-lg px-3 py-1.5 text-sm font-medium transition ${
-                  active
-                    ? 'bg-elevated text-fg ring-1 ring-strong'
-                    : 'text-muted hover:bg-card hover:text-fg'
-                }`}
-              >
-                {l.label}
-              </a>
-            );
-          })}
-        </nav>
-
-        {user && <UserMenu client:load userName={user.name} userEmail={user.email} />}
+          </a>
+          <span class="truncate text-[15px] font-semibold tracking-tight">{navTitle}</span>
+        </div>
       </div>
     </header>
 

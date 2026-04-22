@@ -777,11 +777,11 @@ function SetRow({
         <button
           type="button"
           onClick={onStartEdit}
-          className="grid h-7 w-7 place-items-center rounded-md text-muted opacity-0 transition hover:bg-card hover:text-fg group-hover:opacity-100"
+          className="grid h-8 w-8 place-items-center rounded-md text-muted opacity-100 transition hover:bg-card hover:text-fg sm:opacity-0 sm:group-hover:opacity-100"
           aria-label="Editar set"
           title="Editar"
         >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
             <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
           </svg>
@@ -789,11 +789,11 @@ function SetRow({
         <button
           type="button"
           onClick={onDelete}
-          className="grid h-7 w-7 place-items-center rounded-md text-muted opacity-0 transition hover:bg-danger/10 hover:text-danger group-hover:opacity-100"
+          className="grid h-8 w-8 place-items-center rounded-md text-muted opacity-100 transition hover:bg-danger/10 hover:text-danger sm:opacity-0 sm:group-hover:opacity-100"
           aria-label="Eliminar set"
           title="Eliminar"
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
         </button>
       </div>
     </li>
