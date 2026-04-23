@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { getCurrentUser, signOut, type UserProfile } from '../lib/auth';
+import { resetLocal } from '../lib/sqlite';
 
 type NavKey = 'today' | 'calendar' | 'diary' | 'stats' | 'exercises';
 
 interface Props {
   active: NavKey;
-  userName: string;
-  userEmail: string;
 }
 
 interface Item { key: NavKey; href: string; label: string; icon: JSX.Element }
@@ -58,15 +58,17 @@ const ITEMS: Item[] = [
   },
 ];
 
-export default function SideNav({ active, userName, userEmail }: Props) {
+export default function SideNav({ active }: Props) {
   const [open, setOpen] = useState(false);
   const [theme, setTheme] = useState<'light' | 'dark'>('dark');
   const [mounted, setMounted] = useState(false);
+  const [user, setUser] = useState<UserProfile | null>(null);
 
   useEffect(() => {
     setMounted(true);
     const t = (document.documentElement.getAttribute('data-theme') as 'light' | 'dark') || 'dark';
     setTheme(t);
+    setUser(getCurrentUser());
   }, []);
 
   useEffect(() => {
@@ -88,16 +90,13 @@ export default function SideNav({ active, userName, userEmail }: Props) {
   }
 
   async function logout() {
-    try {
-      await fetch('/api/auth/sign-out', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: '{}',
-      });
-    } catch {}
+    await signOut();
+    await resetLocal();
     window.location.replace('/login');
   }
 
+  const userName = user?.name ?? 'Usuario';
+  const userEmail = user?.email ?? '';
   const initial = (userName || userEmail || '?').trim().charAt(0).toUpperCase();
 
   const drawerStyle: React.CSSProperties = {

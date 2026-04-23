@@ -29,3 +29,5 @@ data/
 # Vercel build output
 .vercel/
 
+data/export.json
+public/seed.fitnotes

@@ -1,45 +1,7 @@
 ---
 import Layout from '../layouts/Layout.astro';
-import DayHeader from '../components/DayHeader.astro';
-import WorkoutLogger from '../components/WorkoutLogger';
-import {
-  getCategories,
-  getExercises,
-  getSetsForDate,
-  getWorkoutComment,
-  todayISO,
-} from '../lib/queries';
-
-export const prerender = false;
-
-const user = Astro.locals.user!;
-const date = todayISO();
-const [categories, exercises, sets, comment] = await Promise.all([
-  getCategories(),
-  getExercises(user.id),
-  getSetsForDate(user.id, date),
-  getWorkoutComment(user.id, date),
-]);
-
-const totalVol = sets.reduce((acc, s) => acc + s.weight_kg * s.reps, 0);
-const uniqueEx = new Set(sets.map((s) => s.exercise_id)).size;
-const hasPr = sets.some((s) => s.pr_weight || s.pr_1rm || s.pr_reps);
+import HomeView from '../components/HomeView';
 ---
 <Layout title="Hoy · gymlog" activeNav="today">
-  <DayHeader
-    date={date}
-    setCount={sets.length}
-    exerciseCount={uniqueEx}
-    volume={totalVol}
-    hasPr={hasPr}
-  />
-
-  <WorkoutLogger
-    client:load
-    date={date}
-    exercises={exercises}
-    categories={categories}
-    initialSets={sets}
-    initialComment={comment}
-  />
+  <HomeView client:only="react" />
 </Layout>
