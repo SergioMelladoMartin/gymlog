@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { getCurrentUser, type UserProfile } from '../lib/auth';
+import { getStatus, onStatusChange } from '../lib/sqlite';
+import { getWeeklyStreak } from '../lib/queries';
 import { useT } from '../hooks/useT';
 
 type NavKey = 'today' | 'calendar' | 'diary' | 'stats' | 'exercises';
@@ -61,17 +63,49 @@ const ITEMS: Item[] = [
 export default function SideNav({ active }: Props) {
   const { t } = useT();
   const [open, setOpen] = useState(false);
-  const [mounted, setMounted] = useState(false);
+  // Initialise both `mounted` and `isDesktop` synchronously on the client so
+  // the very first render matches the eventual post-effect state. Without
+  // this the drawer flashes closed for one paint on every navigation —
+  // especially noticeable on desktop where the bar then "pops in".
+  const [mounted, setMounted] = useState(() => typeof window !== 'undefined');
   const [user, setUser] = useState<UserProfile | null>(null);
-  const [isDesktop, setIsDesktop] = useState(false);
-  const [collapsed, setCollapsed] = useState(false);
+  const [isDesktop, setIsDesktop] = useState(() =>
+    typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches,
+  );
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return typeof window !== 'undefined' && localStorage.getItem('sidenav-collapsed') === '1'; } catch { return false; }
+  });
+
+  const [streak, setStreak] = useState(0);
+
+  // Compute the weekly streak whenever the DB finishes loading, after a
+  // remote swap, and whenever the user logs a set (day-level mutations
+  // bump the stored last-sync timestamp which we can listen to).
+  useEffect(() => {
+    function refresh() {
+      if (getStatus().status === 'ready') {
+        try { setStreak(getWeeklyStreak()); } catch { setStreak(0); }
+      } else {
+        setStreak(0);
+      }
+    }
+    refresh();
+    const offStatus = onStatusChange(() => refresh());
+    const onSwap = () => refresh();
+    window.addEventListener('gymlog:db-swapped', onSwap);
+    // Also recompute every minute so a missed midnight or a set added on
+    // another device (pulled on poll) reflects without a full reload.
+    const id = setInterval(refresh, 60_000);
+    return () => {
+      offStatus();
+      window.removeEventListener('gymlog:db-swapped', onSwap);
+      clearInterval(id);
+    };
+  }, []);
 
   useEffect(() => {
     setMounted(true);
     setUser(getCurrentUser());
-    try {
-      setCollapsed(localStorage.getItem('sidenav-collapsed') === '1');
-    } catch {}
 
     // Desktop = always-open sidebar, no backdrop, no body scroll lock.
     // On mobile the drawer behaves as before (hamburger + overlay).
@@ -254,21 +288,36 @@ export default function SideNav({ active }: Props) {
           <a
             href="/profile"
             onClick={() => !isDesktop && setOpen(false)}
-            title={isCollapsed ? `${userName} — Perfil` : undefined}
+            title={
+              isCollapsed
+                ? `${userName} — ${t('nav.profile')}${streak > 0 ? ` · 🔥 ${t('profile.streakWeeks', { n: streak })}` : ''}`
+                : undefined
+            }
             className={`flex items-center rounded-lg bg-elevated/60 transition hover:bg-elevated ${
               isCollapsed ? 'justify-center px-1 py-1.5' : 'gap-2.5 px-3 py-2'
             }`}
           >
-            {user?.picture ? (
-              <img
-                src={user.picture}
-                alt=""
-                className="h-9 w-9 shrink-0 rounded-full object-cover"
-                referrerPolicy="no-referrer"
-              />
-            ) : (
-              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-accent text-sm font-bold text-ink">{initial}</span>
-            )}
+            <span className="relative shrink-0">
+              {streak > 0 && (
+                <span
+                  className="absolute -right-1 -top-1 z-10 inline-flex items-center gap-0.5 rounded-full border border-card bg-accent px-1 py-[1px] text-[9px] font-bold leading-none text-ink shadow-sm"
+                  title={`🔥 ${t('profile.streakWeeks', { n: streak })}`}
+                  aria-label={`🔥 ${t('profile.streakWeeks', { n: streak })}`}
+                >
+                  🔥{streak}
+                </span>
+              )}
+              {user?.picture ? (
+                <img
+                  src={user.picture}
+                  alt=""
+                  className="h-9 w-9 shrink-0 rounded-full object-cover"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-accent text-sm font-bold text-ink">{initial}</span>
+              )}
+            </span>
             {!isCollapsed && (
               <>
                 <div className="min-w-0 flex-1">
