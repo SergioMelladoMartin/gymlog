@@ -381,15 +381,15 @@ function QuickAdd({
   }
 
   return (
-    <form onSubmit={submit} className="flex items-end gap-2">
-      <div className="flex flex-1 items-end gap-1">
+    <form onSubmit={submit} className="flex items-end gap-1.5">
+      <div className="flex flex-[2] items-end gap-1">
         <button
           type="button"
           onClick={() => bumpWeight(-2.5)}
-          className="grid h-[58px] w-9 shrink-0 place-items-center rounded-xl border border-border bg-elevated text-muted transition hover:border-strong hover:text-fg active:scale-95"
+          className="grid h-[58px] w-7 shrink-0 place-items-center rounded-lg border border-border bg-elevated text-muted transition hover:border-strong hover:text-fg active:scale-95"
           aria-label="Restar 2.5 kg"
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M5 12h14" /></svg>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M5 12h14" /></svg>
         </button>
         <NumField
           label="Peso · kg"
@@ -402,25 +402,25 @@ function QuickAdd({
         <button
           type="button"
           onClick={() => bumpWeight(+2.5)}
-          className="grid h-[58px] w-9 shrink-0 place-items-center rounded-xl border border-border bg-elevated text-muted transition hover:border-strong hover:text-fg active:scale-95"
+          className="grid h-[58px] w-7 shrink-0 place-items-center rounded-lg border border-border bg-elevated text-muted transition hover:border-strong hover:text-fg active:scale-95"
           aria-label="Sumar 2.5 kg"
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M12 5v14" /><path d="M5 12h14" /></svg>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M12 5v14" /><path d="M5 12h14" /></svg>
         </button>
       </div>
       <NumField label="Reps" value={draft.reps} onChange={(v) => setDraft((d) => ({ ...d, reps: v }))} />
       <button
         type="submit"
-        className="grid h-[58px] w-14 place-items-center rounded-xl bg-accent font-bold text-ink transition hover:brightness-110 active:scale-95 disabled:opacity-40"
+        className="grid h-[58px] w-10 shrink-0 place-items-center rounded-lg bg-accent font-bold text-ink transition hover:brightness-110 active:scale-95 disabled:opacity-40"
         disabled={!draft.weight || !draft.reps}
         aria-label={justAdded ? 'Añadido' : 'Añadir set'}
       >
         {justAdded ? (
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="20 6 9 17 4 12" />
           </svg>
         ) : (
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M12 5v14" /><path d="M5 12h14" /></svg>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M12 5v14" /><path d="M5 12h14" /></svg>
         )}
       </button>
     </form>
@@ -936,16 +936,16 @@ function QuickAddCardio({
       </label>
       <button
         type="submit"
-        className="grid h-[58px] w-14 place-items-center rounded-xl bg-accent font-bold text-ink transition hover:brightness-110 active:scale-95 disabled:opacity-40"
+        className="grid h-[58px] w-10 shrink-0 place-items-center rounded-lg bg-accent font-bold text-ink transition hover:brightness-110 active:scale-95 disabled:opacity-40"
         disabled={!duration.trim()}
         aria-label={justAdded ? 'Añadido' : 'Añadir serie'}
       >
         {justAdded ? (
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="20 6 9 17 4 12" />
           </svg>
         ) : (
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M12 5v14" /><path d="M5 12h14" /></svg>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M12 5v14" /><path d="M5 12h14" /></svg>
         )}
       </button>
     </form>
