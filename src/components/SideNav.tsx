@@ -181,7 +181,36 @@ export default function SideNav({ active }: Props) {
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
             </button>
           )}
+          {isDesktop && !isCollapsed && (
+            <button
+              type="button"
+              onClick={toggleCollapsed}
+              title="Replegar"
+              aria-label="Replegar barra"
+              className="grid h-8 w-8 place-items-center rounded-md text-muted transition hover:bg-elevated hover:text-fg"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="m15 18-6-6 6-6" />
+                <path d="M21 4v16" />
+              </svg>
+            </button>
+          )}
         </div>
+
+        {isDesktop && isCollapsed && (
+          <button
+            type="button"
+            onClick={toggleCollapsed}
+            title="Expandir"
+            aria-label="Expandir barra"
+            className="mx-auto mt-2 grid h-8 w-8 place-items-center rounded-md text-muted transition hover:bg-elevated hover:text-fg"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="m9 18 6-6-6-6" />
+              <path d="M3 4v16" />
+            </svg>
+          </button>
+        )}
 
         <nav className={`flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto ${isCollapsed ? 'p-2' : 'p-3'}`}>
           {ITEMS.map((item) => {
@@ -206,10 +235,25 @@ export default function SideNav({ active }: Props) {
 
         <div className={`shrink-0 border-t border-border ${isCollapsed ? 'p-2' : 'p-3'}`}>
           <a
+            href="/settings"
+            onClick={() => !isDesktop && setOpen(false)}
+            title={isCollapsed ? 'Ajustes' : undefined}
+            className={`mb-1 flex w-full items-center rounded-lg text-sm text-fg transition hover:bg-elevated ${
+              isCollapsed ? 'justify-center px-0 py-2' : 'gap-2 px-3 py-2'
+            }`}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+            {!isCollapsed && 'Ajustes'}
+          </a>
+
+          <a
             href="/profile"
             onClick={() => !isDesktop && setOpen(false)}
             title={isCollapsed ? `${userName} — Perfil` : undefined}
-            className={`mb-2 flex items-center rounded-lg bg-elevated/60 transition hover:bg-elevated ${
+            className={`flex items-center rounded-lg bg-elevated/60 transition hover:bg-elevated ${
               isCollapsed ? 'justify-center px-1 py-1.5' : 'gap-2.5 px-3 py-2'
             }`}
           >
@@ -233,48 +277,6 @@ export default function SideNav({ active }: Props) {
               </>
             )}
           </a>
-
-          <a
-            href="/settings"
-            onClick={() => !isDesktop && setOpen(false)}
-            title={isCollapsed ? 'Ajustes' : undefined}
-            className={`flex w-full items-center rounded-lg text-sm text-fg transition hover:bg-elevated ${
-              isCollapsed ? 'justify-center px-0 py-2' : 'gap-2 px-3 py-2'
-            }`}
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="3" />
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-            </svg>
-            {!isCollapsed && 'Ajustes'}
-          </a>
-
-          {isDesktop && (
-            <button
-              type="button"
-              onClick={toggleCollapsed}
-              title={collapsed ? 'Expandir' : 'Replegar'}
-              aria-label={collapsed ? 'Expandir barra' : 'Replegar barra'}
-              className={`mt-1 flex w-full items-center rounded-lg text-sm text-muted transition hover:bg-elevated hover:text-fg ${
-                isCollapsed ? 'justify-center px-0 py-2' : 'gap-2 px-3 py-2'
-              }`}
-            >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                {collapsed ? (
-                  <>
-                    <path d="m9 18 6-6-6-6" />
-                    <path d="M3 4v16" />
-                  </>
-                ) : (
-                  <>
-                    <path d="m15 18-6-6 6-6" />
-                    <path d="M21 4v16" />
-                  </>
-                )}
-              </svg>
-              {!isCollapsed && 'Replegar'}
-            </button>
-          )}
         </div>
       </aside>
     </>

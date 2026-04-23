@@ -35,11 +35,16 @@ interface DraftSet {
 export default function WorkoutLogger({ date, exercises: initialExercises, categories, initialSets, initialComment }: Props) {
   const [exercises, setExercises] = useState<Exercise[]>(initialExercises);
   const [sets, setSets] = useState<TrainingSet[]>(initialSets);
-  const [selectedExerciseId, setSelectedExerciseId] = useState<number | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [comment, setComment] = useState<string>(initialComment ?? '');
   const [commentDirty, setCommentDirty] = useState(false);
   const [editingSetId, setEditingSetId] = useState<number | null>(null);
+  // Exercises chosen via the picker but without any sets yet. They still
+  // deserve a card so the user can log their first set.
+  const [pendingExerciseIds, setPendingExerciseIds] = useState<number[]>([]);
+  // ex_id → timestamp ms of the last set added in this session. Powers the
+  // rest-timer chip on each card.
+  const [lastSetAt, setLastSetAt] = useState<Record<number, number>>({});
 
   // Sync incoming props when the parent finishes loading data from the
   // in-browser db. `useState(initialSets)` only reads props on first render,
@@ -91,6 +96,8 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
   function addSet(exerciseId: number, weight: number, reps: number) {
     qCreateSet({ exercise_id: exerciseId, date, weight_kg: weight, reps });
     refreshSets();
+    setLastSetAt((prev) => ({ ...prev, [exerciseId]: Date.now() }));
+    setPendingExerciseIds((prev) => prev.filter((id) => id !== exerciseId));
   }
 
   function addCardioSet(exerciseId: number, durationSec: number, distanceM: number) {
@@ -103,6 +110,8 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
       distance_m: distanceM,
     });
     refreshSets();
+    setLastSetAt((prev) => ({ ...prev, [exerciseId]: Date.now() }));
+    setPendingExerciseIds((prev) => prev.filter((id) => id !== exerciseId));
   }
 
   function deleteSet(id: number) {
@@ -119,8 +128,18 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
   }
 
   function selectExercise(id: number) {
-    setSelectedExerciseId(id);
     setPickerOpen(false);
+    // If it's not yet in today's sets, queue a blank card for it.
+    if (!sets.some((s) => s.exercise_id === id)) {
+      setPendingExerciseIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
+    }
+    // Bring it into view + focus the entry form after paint.
+    setTimeout(() => {
+      const node = document.getElementById(`ex-${id}`);
+      node?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      const input = node?.querySelector<HTMLInputElement>('input[data-quickadd-focus]');
+      input?.focus();
+    }, 80);
   }
 
   async function createExercise(name: string, categoryId: number): Promise<Exercise | null> {
@@ -145,7 +164,15 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
     }
   }
 
-  const selectedExercise = selectedExerciseId != null ? exercises.find((e) => e.id === selectedExerciseId) ?? null : null;
+  // Render order: exercises with sets (in the order they were first logged),
+  // followed by any that were picked but haven't got a set yet.
+  const allCards = useMemo(() => {
+    const withSetsIds = new Set(grouped.map((g) => g.exerciseId));
+    const pending = pendingExerciseIds
+      .filter((id) => !withSetsIds.has(id))
+      .map((id) => ({ exerciseId: id, sets: [] as TrainingSet[] }));
+    return [...grouped, ...pending];
+  }, [grouped, pendingExerciseIds]);
 
   // PR summary for today
   const prTotals = useMemo(() => {
@@ -178,60 +205,19 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
         </div>
       )}
 
-      {/* Active exercise card */}
-      <section
-        className={`relative overflow-hidden rounded-2xl border bg-card transition ${
-          selectedExercise ? 'border-strong' : 'border-border'
-        }`}
+      {/* Add-exercise CTA — always visible at the top so starting a new
+          exercise is never confused with editing the one you're on. */}
+      <button
+        type="button"
+        onClick={() => setPickerOpen(true)}
+        className="flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-border bg-card/60 px-4 py-3.5 text-sm font-semibold text-fg transition hover:border-strong hover:bg-elevated"
       >
-        {selectedExercise && <div className="absolute inset-x-0 top-0 h-0.5 bg-accent" />}
-        <div className="flex items-center justify-between px-4 pt-4">
-          <div className="section-title">Ejercicio</div>
-          {selectedExercise && (
-            <a href={`/exercise?id=${selectedExercise.id}`} className="text-xs text-muted hover:text-fg">
-              histórico →
-            </a>
-          )}
-        </div>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M12 5v14" /><path d="M5 12h14" /></svg>
+        Añadir ejercicio
+      </button>
 
-        <button
-          type="button"
-          onClick={() => setPickerOpen(true)}
-          className="flex w-full items-center justify-between px-4 pt-2 pb-3 text-left"
-        >
-          {selectedExercise ? (
-            <span className="flex items-center gap-2.5">
-              <span className="h-2.5 w-2.5 rounded-full" style={{ background: selectedExercise.category_color ?? '#888' }} />
-              <span className="text-lg font-semibold tracking-tight">{selectedExercise.name}</span>
-            </span>
-          ) : (
-            <span className="text-muted">Elegir ejercicio…</span>
-          )}
-          <span className="text-muted">›</span>
-        </button>
-
-        {selectedExercise && (
-          <div className="border-t border-border/70 bg-card/40 px-4 py-3">
-            {isCardioExercise(selectedExercise.id) ? (
-              <QuickAddCardio
-                exerciseId={selectedExercise.id}
-                onAdd={addCardioSet}
-                lastSets={sets.filter((s) => s.exercise_id === selectedExercise.id)}
-              />
-            ) : (
-              <QuickAdd
-                exerciseId={selectedExercise.id}
-                onAdd={addSet}
-                lastSets={sets.filter((s) => s.exercise_id === selectedExercise.id)}
-              />
-            )}
-          </div>
-        )}
-      </section>
-
-      {/* Today's sets */}
-      {grouped.length === 0 ? (
-        <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-border bg-card/40 py-12 text-center">
+      {allCards.length === 0 ? (
+        <div className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border bg-card/40 py-10 text-center">
           <div className="grid h-12 w-12 place-items-center rounded-full bg-elevated text-muted">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
               <path d="M6.5 6.5h11" /><path d="M6.5 17.5h11" />
@@ -239,98 +225,80 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
               <path d="M6.5 6.5v11" /><path d="M17.5 6.5v11" />
             </svg>
           </div>
-          <div className="text-sm text-muted">Elige un ejercicio y empieza a registrar.</div>
-          <button
-            type="button"
-            onClick={() => setPickerOpen(true)}
-            className="rounded-full bg-accent px-4 py-2 text-xs font-semibold text-ink transition hover:brightness-110"
-          >
-            + Elegir ejercicio
-          </button>
+          <div className="text-sm text-muted">Aún no hay ejercicios en este día.</div>
         </div>
       ) : (
         <div className="flex flex-col gap-3">
-          {grouped.map(({ exerciseId, sets: exSets }) => {
+          {allCards.map(({ exerciseId, sets: exSets }) => {
             const ex = exercises.find((e) => e.id === exerciseId);
             const cardio = isCardioExercise(exerciseId);
             const totalVol = exSets.reduce((acc, s) => acc + s.weight_kg * s.reps, 0);
             const totalDuration = exSets.reduce((acc, s) => acc + s.duration_seconds, 0);
             const totalDistance = exSets.reduce((acc, s) => acc + s.distance_m, 0);
             const catColor = ex?.category_color ?? '#888';
-            const lastSet = exSets.at(-1);
+            const lastExSets = exSets;
             return (
               <article
                 key={exerciseId}
+                id={`ex-${exerciseId}`}
                 className="card relative overflow-hidden"
                 style={{ boxShadow: `inset 3px 0 0 ${catColor}` }}
               >
                 <header className="flex items-center justify-between gap-2 px-4 py-3">
-                  <a href={`/exercise?id=${exerciseId}`} className="min-w-0 truncate font-semibold tracking-tight hover:underline">
-                    {ex?.name ?? `#${exerciseId}`}
-                  </a>
-                  <div className="flex shrink-0 items-center gap-2">
-                    <span className="hidden text-xs tabular-nums text-muted sm:inline">
-                      {cardio
-                        ? `${exSets.length} ${exSets.length === 1 ? 'serie' : 'series'} · ${formatDuration(totalDuration)}${totalDistance > 0 ? ` · ${formatDistance(totalDistance)}` : ''}`
-                        : `${exSets.length} sets · ${Math.round(totalVol).toLocaleString('es-ES')} kg`}
-                    </span>
-                    {lastSet && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          cardio
-                            ? addCardioSet(exerciseId, lastSet.duration_seconds, lastSet.distance_m)
-                            : addSet(exerciseId, lastSet.weight_kg, lastSet.reps)
-                        }
-                        className="grid h-7 w-7 place-items-center rounded-md border border-border bg-elevated text-muted transition hover:border-strong hover:text-fg"
-                        title={cardio
-                          ? `Repetir última serie (${formatDuration(lastSet.duration_seconds)}${lastSet.distance_m ? ` · ${formatDistance(lastSet.distance_m)}` : ''})`
-                          : `Repetir último set (${formatKg(lastSet.weight_kg)}×${lastSet.reps})`}
-                        aria-label="Repetir última serie"
-                      >
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M17 2l4 4-4 4" /><path d="M3 11v-1a4 4 0 0 1 4-4h14" />
-                          <path d="M7 22l-4-4 4-4" /><path d="M21 13v1a4 4 0 0 1-4 4H3" />
-                        </svg>
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => setSelectedExerciseId(exerciseId)}
-                      className="rounded-md border border-strong bg-elevated px-2.5 py-1 text-xs font-semibold text-fg transition hover:bg-card"
-                    >
-                      + {cardio ? 'serie' : 'set'}
-                    </button>
+                  <div className="flex min-w-0 flex-1 items-center gap-2">
+                    <a href={`/exercise?id=${exerciseId}`} className="min-w-0 truncate font-semibold tracking-tight hover:underline">
+                      {ex?.name ?? `#${exerciseId}`}
+                    </a>
+                    <RestTimer startedAt={lastSetAt[exerciseId]} />
                   </div>
+                  <span className="hidden shrink-0 text-xs tabular-nums text-muted sm:inline">
+                    {cardio
+                      ? `${exSets.length} ${exSets.length === 1 ? 'serie' : 'series'}${totalDuration ? ` · ${formatDuration(totalDuration)}` : ''}${totalDistance > 0 ? ` · ${formatDistance(totalDistance)}` : ''}`
+                      : exSets.length
+                        ? `${exSets.length} sets · ${Math.round(totalVol).toLocaleString('es-ES')} kg`
+                        : 'Sin series aún'}
+                  </span>
                 </header>
 
-                <div className="flex items-center justify-between border-t border-border/60 bg-elevated/30 px-4 py-1.5 text-[11px] tabular-nums text-muted sm:hidden">
-                  <span>{exSets.length} {cardio ? (exSets.length === 1 ? 'serie' : 'series') : 'sets'}</span>
-                  <span>
-                    {cardio
-                      ? `${formatDuration(totalDuration)}${totalDistance > 0 ? ` · ${formatDistance(totalDistance)}` : ''}`
-                      : `${Math.round(totalVol).toLocaleString('es-ES')} kg`}
-                  </span>
-                </div>
+                {exSets.length > 0 && (
+                  <>
+                    <div className="flex items-center justify-between border-t border-border/60 bg-elevated/30 px-4 py-1.5 text-[11px] tabular-nums text-muted sm:hidden">
+                      <span>{exSets.length} {cardio ? (exSets.length === 1 ? 'serie' : 'series') : 'sets'}</span>
+                      <span>
+                        {cardio
+                          ? `${formatDuration(totalDuration)}${totalDistance > 0 ? ` · ${formatDistance(totalDistance)}` : ''}`
+                          : `${Math.round(totalVol).toLocaleString('es-ES')} kg`}
+                      </span>
+                    </div>
 
-                <ol className="flex flex-col divide-y divide-border/60">
-                  {exSets.map((s, i) => (
-                    <SetRow
-                      key={s.id}
-                      set={s}
-                      index={i}
-                      cardio={cardio}
-                      editing={editingSetId === s.id}
-                      onStartEdit={() => setEditingSetId(s.id)}
-                      onCancelEdit={() => setEditingSetId(null)}
-                      onSave={async (patch) => {
-                        await updateSet(s.id, patch);
-                        setEditingSetId(null);
-                      }}
-                      onDelete={() => deleteSet(s.id)}
-                    />
-                  ))}
-                </ol>
+                    <ol className="flex flex-col divide-y divide-border/60">
+                      {exSets.map((s, i) => (
+                        <SetRow
+                          key={s.id}
+                          set={s}
+                          index={i}
+                          cardio={cardio}
+                          editing={editingSetId === s.id}
+                          onStartEdit={() => setEditingSetId(s.id)}
+                          onCancelEdit={() => setEditingSetId(null)}
+                          onSave={async (patch) => {
+                            await updateSet(s.id, patch);
+                            setEditingSetId(null);
+                          }}
+                          onDelete={() => deleteSet(s.id)}
+                        />
+                      ))}
+                    </ol>
+                  </>
+                )}
+
+                <div className="border-t border-border/60 bg-elevated/20 px-4 py-3">
+                  {cardio ? (
+                    <QuickAddCardio exerciseId={exerciseId} onAdd={addCardioSet} lastSets={lastExSets} />
+                  ) : (
+                    <QuickAdd exerciseId={exerciseId} onAdd={addSet} lastSets={lastExSets} />
+                  )}
+                </div>
               </article>
             );
           })}
@@ -388,7 +356,6 @@ function QuickAdd({
       weight: last ? String(last.weight_kg) : '',
       reps: last ? String(last.reps) : '',
     });
-    weightRef.current?.focus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [exerciseId]);
 
@@ -406,9 +373,41 @@ function QuickAdd({
     weightRef.current?.focus();
   }
 
+  function bumpWeight(delta: number) {
+    const current = parseFloat(draft.weight.replace(',', '.'));
+    const base = isNaN(current) ? 0 : current;
+    const next = Math.max(0, Math.round((base + delta) * 100) / 100);
+    setDraft((d) => ({ ...d, weight: formatKg(next) }));
+  }
+
   return (
     <form onSubmit={submit} className="flex items-end gap-2">
-      <NumField label="Peso · kg" inputRef={weightRef} value={draft.weight} onChange={(v) => setDraft((d) => ({ ...d, weight: v }))} decimal />
+      <div className="flex flex-1 items-end gap-1">
+        <button
+          type="button"
+          onClick={() => bumpWeight(-2.5)}
+          className="grid h-[58px] w-9 shrink-0 place-items-center rounded-xl border border-border bg-elevated text-muted transition hover:border-strong hover:text-fg active:scale-95"
+          aria-label="Restar 2.5 kg"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M5 12h14" /></svg>
+        </button>
+        <NumField
+          label="Peso · kg"
+          inputRef={weightRef}
+          value={draft.weight}
+          onChange={(v) => setDraft((d) => ({ ...d, weight: v }))}
+          decimal
+          focusMarker
+        />
+        <button
+          type="button"
+          onClick={() => bumpWeight(+2.5)}
+          className="grid h-[58px] w-9 shrink-0 place-items-center rounded-xl border border-border bg-elevated text-muted transition hover:border-strong hover:text-fg active:scale-95"
+          aria-label="Sumar 2.5 kg"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M12 5v14" /><path d="M5 12h14" /></svg>
+        </button>
+      </div>
       <NumField label="Reps" value={draft.reps} onChange={(v) => setDraft((d) => ({ ...d, reps: v }))} />
       <button
         type="submit"
@@ -434,12 +433,14 @@ function NumField({
   onChange,
   inputRef,
   decimal = false,
+  focusMarker = false,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   inputRef?: React.RefObject<HTMLInputElement | null>;
   decimal?: boolean;
+  focusMarker?: boolean;
 }) {
   return (
     <label className="group flex-1">
@@ -450,6 +451,7 @@ function NumField({
         inputMode={decimal ? 'decimal' : 'numeric'}
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        {...(focusMarker ? { 'data-quickadd-focus': '' } : {})}
         className="w-full rounded-xl border border-border bg-elevated px-3 py-3 text-xl font-semibold tabular-nums outline-none transition focus:border-accent/60"
       />
     </label>
@@ -888,7 +890,6 @@ function QuickAddCardio({
     const last = lastSets.at(-1);
     setDuration(last && last.duration_seconds ? formatDuration(last.duration_seconds) : '');
     setDistance(last && last.distance_m ? (last.distance_m / 1000).toString() : '');
-    durationRef.current?.focus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [exerciseId]);
 
@@ -918,6 +919,7 @@ function QuickAddCardio({
           placeholder="30:00"
           value={duration}
           onChange={(e) => setDuration(e.target.value)}
+          data-quickadd-focus
           className="w-full rounded-xl border border-border bg-elevated px-3 py-3 text-xl font-semibold tabular-nums outline-none transition focus:border-accent/60"
         />
       </label>
@@ -1091,6 +1093,40 @@ function formatDistance(meters: number): string {
     return `${km % 1 === 0 ? km.toFixed(0) : km.toFixed(2).replace(/\.?0+$/, '')} km`;
   }
   return `${Math.round(meters)} m`;
+}
+
+function RestTimer({ startedAt }: { startedAt?: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!startedAt) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [startedAt]);
+  if (!startedAt) return null;
+  const elapsed = Math.max(0, Math.floor((now - startedAt) / 1000));
+  if (elapsed > 600) return null; // stop showing after 10 min of idle
+  const m = Math.floor(elapsed / 60);
+  const s = elapsed % 60;
+  // Colour hints: <60s red (too soon), 60–120s amber (stay sharp), >120s dim.
+  const tone =
+    elapsed < 60
+      ? 'border-danger/40 bg-danger/10 text-danger'
+      : elapsed < 120
+        ? 'border-amber-400/40 bg-amber-400/10 text-amber-400'
+        : 'border-border bg-elevated text-muted';
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold tabular-nums ${tone}`}
+      title="Tiempo desde la última serie"
+    >
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="13" r="8" />
+        <path d="M12 9v4l2 2" />
+        <path d="M9 2h6" />
+      </svg>
+      {m}:{String(s).padStart(2, '0')}
+    </span>
+  );
 }
 
 function relativeDate(iso: string) {
