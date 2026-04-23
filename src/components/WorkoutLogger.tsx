@@ -380,80 +380,107 @@ function QuickAdd({
     setDraft((d) => ({ ...d, weight: formatKg(next) }));
   }
 
+  function bumpReps(delta: number) {
+    const current = parseInt(draft.reps, 10);
+    const base = isNaN(current) ? 0 : current;
+    const next = Math.max(0, base + delta);
+    setDraft((d) => ({ ...d, reps: next === 0 ? '' : String(next) }));
+  }
+
   return (
-    <form onSubmit={submit} className="flex items-end gap-1.5">
-      <div className="flex flex-[2] items-end gap-1">
-        <button
-          type="button"
-          onClick={() => bumpWeight(-2.5)}
-          className="grid h-[58px] w-7 shrink-0 place-items-center rounded-lg border border-border bg-elevated text-muted transition hover:border-strong hover:text-fg active:scale-95"
-          aria-label="Restar 2.5 kg"
-        >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M5 12h14" /></svg>
-        </button>
-        <NumField
-          label="Peso · kg"
-          inputRef={weightRef}
-          value={draft.weight}
-          onChange={(v) => setDraft((d) => ({ ...d, weight: v }))}
-          decimal
-          focusMarker
-        />
-        <button
-          type="button"
-          onClick={() => bumpWeight(+2.5)}
-          className="grid h-[58px] w-7 shrink-0 place-items-center rounded-lg border border-border bg-elevated text-muted transition hover:border-strong hover:text-fg active:scale-95"
-          aria-label="Sumar 2.5 kg"
-        >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M12 5v14" /><path d="M5 12h14" /></svg>
-        </button>
-      </div>
-      <NumField label="Reps" value={draft.reps} onChange={(v) => setDraft((d) => ({ ...d, reps: v }))} />
+    <form onSubmit={submit} className="flex items-end gap-2">
+      <StepperField
+        label="Peso · kg"
+        value={draft.weight}
+        onChange={(v) => setDraft((d) => ({ ...d, weight: v }))}
+        onDecrement={() => bumpWeight(-2.5)}
+        onIncrement={() => bumpWeight(+2.5)}
+        decrementLabel="Restar 2.5 kg"
+        incrementLabel="Sumar 2.5 kg"
+        inputRef={weightRef}
+        focusMarker
+        decimal
+      />
+      <StepperField
+        label="Reps"
+        value={draft.reps}
+        onChange={(v) => setDraft((d) => ({ ...d, reps: v }))}
+        onDecrement={() => bumpReps(-1)}
+        onIncrement={() => bumpReps(+1)}
+        decrementLabel="Restar 1 rep"
+        incrementLabel="Sumar 1 rep"
+      />
       <button
         type="submit"
-        className="grid h-[58px] w-10 shrink-0 place-items-center rounded-lg bg-accent font-bold text-ink transition hover:brightness-110 active:scale-95 disabled:opacity-40"
+        className="grid h-[52px] w-[52px] shrink-0 place-items-center rounded-xl bg-accent text-ink transition hover:brightness-110 active:scale-95 disabled:opacity-40"
         disabled={!draft.weight || !draft.reps}
         aria-label={justAdded ? 'Añadido' : 'Añadir set'}
       >
         {justAdded ? (
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="20 6 9 17 4 12" />
           </svg>
         ) : (
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M12 5v14" /><path d="M5 12h14" /></svg>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M12 5v14" /><path d="M5 12h14" /></svg>
         )}
       </button>
     </form>
   );
 }
 
-function NumField({
+function StepperField({
   label,
   value,
   onChange,
+  onDecrement,
+  onIncrement,
+  decrementLabel,
+  incrementLabel,
   inputRef,
-  decimal = false,
   focusMarker = false,
+  decimal = false,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
+  onDecrement: () => void;
+  onIncrement: () => void;
+  decrementLabel: string;
+  incrementLabel: string;
   inputRef?: React.RefObject<HTMLInputElement | null>;
-  decimal?: boolean;
   focusMarker?: boolean;
+  decimal?: boolean;
 }) {
   return (
-    <label className="group flex-1">
+    <label className="min-w-0 flex-1">
       <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-muted">{label}</div>
-      <input
-        ref={inputRef}
-        type="text"
-        inputMode={decimal ? 'decimal' : 'numeric'}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        {...(focusMarker ? { 'data-quickadd-focus': '' } : {})}
-        className="w-full rounded-xl border border-border bg-elevated px-3 py-3 text-xl font-semibold tabular-nums outline-none transition focus:border-accent/60"
-      />
+      <div className="flex h-[52px] items-stretch overflow-hidden rounded-xl border border-border bg-elevated transition focus-within:border-accent/60">
+        <button
+          type="button"
+          onClick={onDecrement}
+          aria-label={decrementLabel}
+          className="grid w-10 shrink-0 place-items-center border-r border-border text-muted transition hover:text-fg active:bg-border/40"
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M5 12h14" /></svg>
+        </button>
+        <input
+          ref={inputRef}
+          type="text"
+          inputMode={decimal ? 'decimal' : 'numeric'}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          {...(focusMarker ? { 'data-quickadd-focus': '' } : {})}
+          className="min-w-0 flex-1 bg-transparent px-1 text-center text-lg font-semibold tabular-nums outline-none"
+        />
+        <button
+          type="button"
+          onClick={onIncrement}
+          aria-label={incrementLabel}
+          className="grid w-10 shrink-0 place-items-center border-l border-border text-muted transition hover:text-fg active:bg-border/40"
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M12 5v14" /><path d="M5 12h14" /></svg>
+        </button>
+      </div>
     </label>
   );
 }
@@ -920,7 +947,7 @@ function QuickAddCardio({
           value={duration}
           onChange={(e) => setDuration(e.target.value)}
           data-quickadd-focus
-          className="w-full rounded-xl border border-border bg-elevated px-3 py-3 text-xl font-semibold tabular-nums outline-none transition focus:border-accent/60"
+          className="h-[52px] w-full rounded-xl border border-border bg-elevated px-3 text-lg font-semibold tabular-nums outline-none transition focus:border-accent/60"
         />
       </label>
       <label className="flex-1">
@@ -931,21 +958,21 @@ function QuickAddCardio({
           placeholder="—"
           value={distance}
           onChange={(e) => setDistance(e.target.value)}
-          className="w-full rounded-xl border border-border bg-elevated px-3 py-3 text-xl font-semibold tabular-nums outline-none transition focus:border-accent/60"
+          className="h-[52px] w-full rounded-xl border border-border bg-elevated px-3 text-lg font-semibold tabular-nums outline-none transition focus:border-accent/60"
         />
       </label>
       <button
         type="submit"
-        className="grid h-[58px] w-10 shrink-0 place-items-center rounded-lg bg-accent font-bold text-ink transition hover:brightness-110 active:scale-95 disabled:opacity-40"
+        className="grid h-[52px] w-[52px] shrink-0 place-items-center rounded-xl bg-accent text-ink transition hover:brightness-110 active:scale-95 disabled:opacity-40"
         disabled={!duration.trim()}
         aria-label={justAdded ? 'Añadido' : 'Añadir serie'}
       >
         {justAdded ? (
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="20 6 9 17 4 12" />
           </svg>
         ) : (
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M12 5v14" /><path d="M5 12h14" /></svg>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M12 5v14" /><path d="M5 12h14" /></svg>
         )}
       </button>
     </form>
