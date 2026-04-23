@@ -45,6 +45,10 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
   // ex_id → timestamp ms of the last set added in this session. Powers the
   // rest-timer chip on each card.
   const [lastSetAt, setLastSetAt] = useState<Record<number, number>>({});
+  // Which card currently has its "add set" form expanded. Only one at a time
+  // so the sets you've already logged stay easy to read — the form was
+  // cluttering the view when it was always-on.
+  const [openAdderId, setOpenAdderId] = useState<number | null>(null);
 
   // Sync incoming props when the parent finishes loading data from the
   // in-browser db. `useState(initialSets)` only reads props on first render,
@@ -133,6 +137,9 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
     if (!sets.some((s) => s.exercise_id === id)) {
       setPendingExerciseIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
     }
+    // Auto-expand the adder for the picked exercise so the user lands
+    // directly on the entry form.
+    setOpenAdderId(id);
     // Bring it into view + focus the entry form after paint.
     setTimeout(() => {
       const node = document.getElementById(`ex-${id}`);
@@ -292,13 +299,33 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
                   </>
                 )}
 
-                <div className="border-t border-border/60 bg-elevated/20 px-4 py-3">
-                  {cardio ? (
-                    <QuickAddCardio exerciseId={exerciseId} onAdd={addCardioSet} lastSets={lastExSets} />
-                  ) : (
-                    <QuickAdd exerciseId={exerciseId} onAdd={addSet} lastSets={lastExSets} />
-                  )}
-                </div>
+                {openAdderId === exerciseId ? (
+                  <div className="relative border-t border-border/60 bg-elevated/20 px-4 py-3">
+                    <button
+                      type="button"
+                      onClick={() => setOpenAdderId(null)}
+                      aria-label="Cerrar"
+                      title="Cerrar"
+                      className="absolute right-2 top-2 grid h-6 w-6 place-items-center rounded-md text-muted transition hover:bg-card hover:text-fg"
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
+                    </button>
+                    {cardio ? (
+                      <QuickAddCardio exerciseId={exerciseId} onAdd={addCardioSet} lastSets={lastExSets} />
+                    ) : (
+                      <QuickAdd exerciseId={exerciseId} onAdd={addSet} lastSets={lastExSets} />
+                    )}
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setOpenAdderId(exerciseId)}
+                    className="flex w-full items-center justify-center gap-1.5 border-t border-dashed border-border/80 bg-transparent px-4 py-2 text-[11px] font-medium text-muted transition hover:bg-elevated/40 hover:text-fg"
+                  >
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M12 5v14" /><path d="M5 12h14" /></svg>
+                    Añadir {cardio ? 'serie' : 'set'}
+                  </button>
+                )}
               </article>
             );
           })}
