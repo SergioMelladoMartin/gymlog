@@ -28,19 +28,24 @@ export default function StatsView() {
     const q = (sql: string, params: any[] = []) =>
       db.exec({ sql, bind: params, rowMode: 'object', returnValue: 'resultRows' }) as any[];
 
-    let where = ''; let args: any[] = []; let lbl = 'Todo el histórico';
+    // Build the range predicate once, separately for an aliased vs unaliased
+    // training_log so the `date(...)` function call never gets prefixed with
+    // a table alias (that was producing invalid SQL like `ts.date('now', …)`
+    // and blanking the page on every range except "Todo").
+    let pred = ''; let args: any[] = []; let lbl = 'Todo el histórico';
     switch (range) {
-      case '7d':   where = "WHERE date >= date('now', '-7 days')";   lbl = 'Últimos 7 días'; break;
-      case '30d':  where = "WHERE date >= date('now', '-30 days')";  lbl = 'Últimos 30 días'; break;
-      case '90d':  where = "WHERE date >= date('now', '-90 days')";  lbl = 'Últimos 90 días'; break;
-      case '365d': where = "WHERE date >= date('now', '-365 days')"; lbl = 'Últimos 12 meses'; break;
+      case '7d':   pred = "DATECOL >= date('now', '-7 days')";   lbl = 'Últimos 7 días'; break;
+      case '30d':  pred = "DATECOL >= date('now', '-30 days')";  lbl = 'Últimos 30 días'; break;
+      case '90d':  pred = "DATECOL >= date('now', '-90 days')";  lbl = 'Últimos 90 días'; break;
+      case '365d': pred = "DATECOL >= date('now', '-365 days')"; lbl = 'Últimos 12 meses'; break;
       case 'year':
-        where = 'WHERE date >= ? AND date <= ?';
+        pred = 'DATECOL >= ? AND DATECOL <= ?';
         args = [`${year}-01-01`, `${year}-12-31`];
         lbl = year === new Date().getFullYear() ? 'Año en curso' : `Año ${year}`;
         break;
     }
-    const whereTs = where.replace(/\bdate\b/g, 'ts.date');
+    const where = pred ? `WHERE ${pred.replace(/DATECOL/g, 'date')}` : '';
+    const whereTs = pred ? `WHERE ${pred.replace(/DATECOL/g, 'ts.date')}` : '';
     setLabel(lbl);
 
     const t = q(
