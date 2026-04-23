@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { Category } from '../lib/types';
-import { updateExercise } from '../lib/queries';
+import { countExerciseSets, deleteExercise, updateExercise } from '../lib/queries';
 
 interface Props {
   exerciseId: number;
@@ -23,6 +23,24 @@ export default function ExerciseHeaderEditor({
   const [name, setName] = useState(initialName);
   const [catId, setCatId] = useState(initialCategoryId);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  function handleDelete() {
+    const setCount = countExerciseSets(exerciseId);
+    const msg =
+      setCount > 0
+        ? `Borrar "${initialName}" también eliminará ${setCount} ${setCount === 1 ? 'serie registrada' : 'series registradas'}. Esta acción no se puede deshacer. ¿Continuar?`
+        : `Borrar "${initialName}"? Esta acción no se puede deshacer.`;
+    if (!window.confirm(msg)) return;
+    setDeleting(true);
+    try {
+      deleteExercise(exerciseId);
+      window.location.assign('/exercises');
+    } catch (err: any) {
+      alert(err?.message ?? 'Error al borrar');
+      setDeleting(false);
+    }
+  }
 
   function save(e: React.FormEvent) {
     e.preventDefault();
@@ -99,10 +117,25 @@ export default function ExerciseHeaderEditor({
       </div>
       <button
         type="submit"
-        disabled={!name.trim() || saving}
+        disabled={!name.trim() || saving || deleting}
         className="mt-3 w-full rounded-lg bg-accent py-2 text-sm font-semibold text-ink transition hover:brightness-110 disabled:opacity-40"
       >
         {saving ? 'Guardando…' : 'Guardar'}
+      </button>
+      <button
+        type="button"
+        onClick={handleDelete}
+        disabled={saving || deleting}
+        className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-danger/40 bg-danger/10 py-2 text-sm font-medium text-danger transition hover:bg-danger/20 disabled:opacity-40"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M3 6h18" />
+          <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+          <path d="M19 6 18 20a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+          <path d="M10 11v6" />
+          <path d="M14 11v6" />
+        </svg>
+        {deleting ? 'Borrando…' : 'Borrar ejercicio'}
       </button>
     </form>
   );

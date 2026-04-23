@@ -104,6 +104,22 @@ export function createExercise(name: string, categoryId: number): number {
   return id;
 }
 
+export function countExerciseSets(id: number): number {
+  const row = getDb().exec({
+    sql: 'SELECT COUNT(*) AS n FROM training_log WHERE exercise_id = ?',
+    bind: [id],
+    rowMode: 'object',
+    returnValue: 'resultRows',
+  })[0] as any;
+  return Number(row?.n ?? 0);
+}
+
+export function deleteExercise(id: number): void {
+  exec('DELETE FROM training_log WHERE exercise_id = ?', [id]);
+  exec('DELETE FROM exercise WHERE _id = ?', [id]);
+  markDirty();
+}
+
 export function updateExercise(id: number, patch: { name?: string; category_id?: number }): void {
   const fields: string[] = [];
   const params: any[] = [];
