@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import type { Category, Exercise } from '../lib/queries';
+import type { Category } from '../lib/types';
+import type { ExerciseExtra as Exercise } from '../lib/queries';
 
 interface Props {
   exercises: Exercise[];
@@ -115,7 +116,7 @@ export default function ExerciseList({ exercises, categories, initialCategory = 
               <ul className="card divide-y divide-border">
                 {list.map((e) => (
                   <li key={e.id}>
-                    <a href={`/exercise/${e.id}`} className="flex items-center justify-between gap-3 px-4 py-3 transition hover:bg-elevated">
+                    <a href={`/exercise?id=${e.id}`} className="flex items-center justify-between gap-3 px-4 py-3 transition hover:bg-elevated">
                       <span className="min-w-0 truncate">{e.name}</span>
                       <span className="shrink-0 text-xs text-muted">{formatDate(e.last_used)}</span>
                     </a>

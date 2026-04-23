@@ -1,59 +1,181 @@
-import { betterAuth } from 'better-auth';
-import { LibsqlDialect } from '@libsql/kysely-libsql';
-import { db } from './db';
+// Google Identity Services (GIS) browser-only OAuth + Drive API helpers.
+// No backend, no cookies, no refresh tokens stored. GIS hands us a short-
+// lived access token (~1h) that we cache in memory and re-acquire silently
+// when the user returns.
 
-const secret =
-  import.meta.env?.BETTER_AUTH_SECRET ?? process.env.BETTER_AUTH_SECRET;
+const CLIENT_ID = import.meta.env.PUBLIC_GOOGLE_CLIENT_ID as string | undefined;
+const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.appdata';
+const PROFILE_SCOPES = 'openid email profile';
+const GIS_SRC = 'https://accounts.google.com/gsi/client';
 
-if (!secret) {
-  // Log loudly — auth calls will fail with 500 otherwise.
-  console.error('⚠️  BETTER_AUTH_SECRET is not set. Auth endpoints will fail.');
+interface TokenResponse {
+  access_token: string;
+  expires_in: number;
+  scope: string;
 }
 
-const vercelUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : undefined;
-const vercelProdUrl = process.env.VERCEL_PROJECT_PRODUCTION_URL
-  ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
-  : undefined;
+declare global {
+  interface Window {
+    google?: {
+      accounts: {
+        oauth2: {
+          initTokenClient(config: {
+            client_id: string;
+            scope: string;
+            callback: (r: TokenResponse & { error?: string }) => void;
+            error_callback?: (e: { type: string; message?: string }) => void;
+          }): { requestAccessToken: (opts?: { prompt?: string }) => void };
+          revoke(token: string, done?: () => void): void;
+        };
+      };
+    };
+  }
+}
 
-const baseURL =
-  import.meta.env?.BETTER_AUTH_URL ??
-  process.env.BETTER_AUTH_URL ??
-  vercelProdUrl ??
-  vercelUrl ??
-  'http://localhost:4321';
+interface CachedToken {
+  token: string;
+  expiresAt: number;
+}
 
-const trustedOrigins = Array.from(
-  new Set(
-    [baseURL, vercelUrl, vercelProdUrl, 'http://localhost:4321', 'http://localhost:3000'].filter(
-      (x): x is string => !!x,
-    ),
-  ),
-);
+const STORAGE_KEY = 'gymlog:auth';
+let memoryToken: CachedToken | null = null;
+let userProfile: UserProfile | null = null;
+let gisLoaded: Promise<void> | null = null;
 
-export const auth = betterAuth({
-  secret: secret ?? 'insecure-dev-only-please-set-BETTER_AUTH_SECRET',
-  baseURL,
-  trustedOrigins,
-  database: {
-    // Reuse the same @libsql/client instance exported from ./db so Vercel
-    // bundles only one copy of the native module and all queries share a
-    // single HTTP/2 connection to Turso.
-    dialect: new LibsqlDialect({ client: db as any }),
-    type: 'sqlite',
-  },
-  emailAndPassword: {
-    enabled: true,
-    minPasswordLength: 8,
-    autoSignIn: true,
-  },
-  session: {
-    expiresIn: 60 * 60 * 24 * 30,
-    updateAge: 60 * 60 * 24,
-    cookieCache: { enabled: true, maxAge: 60 * 5 },
-  },
-  advanced: {
-    cookiePrefix: 'gymlog',
-  },
-});
+export interface UserProfile {
+  email: string;
+  name: string;
+  picture?: string;
+}
 
-export type Session = typeof auth.$Infer.Session;
+// ── GIS script loader ────────────────────────────────────────────────────
+function loadGis(): Promise<void> {
+  if (gisLoaded) return gisLoaded;
+  gisLoaded = new Promise((resolve, reject) => {
+    if (typeof window === 'undefined') return reject(new Error('no window'));
+    if (window.google?.accounts?.oauth2) return resolve();
+    const s = document.createElement('script');
+    s.src = GIS_SRC;
+    s.async = true;
+    s.defer = true;
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error('Failed to load Google Identity Services'));
+    document.head.appendChild(s);
+  });
+  return gisLoaded;
+}
+
+function readCachedToken(): CachedToken | null {
+  if (memoryToken && memoryToken.expiresAt > Date.now() + 30_000) return memoryToken;
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as CachedToken & { profile?: UserProfile };
+    if (parsed.expiresAt > Date.now() + 30_000) {
+      memoryToken = { token: parsed.token, expiresAt: parsed.expiresAt };
+      if (parsed.profile) userProfile = parsed.profile;
+      return memoryToken;
+    }
+  } catch {}
+  return null;
+}
+
+function storeToken(token: string, expiresIn: number, profile?: UserProfile) {
+  const expiresAt = Date.now() + expiresIn * 1000;
+  memoryToken = { token, expiresAt };
+  try {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ token, expiresAt, profile: profile ?? userProfile }),
+    );
+  } catch {}
+  if (profile) userProfile = profile;
+}
+
+// ── public API ───────────────────────────────────────────────────────────
+
+export function getClientId(): string {
+  if (!CLIENT_ID) {
+    throw new Error(
+      'Missing PUBLIC_GOOGLE_CLIENT_ID env var — set it in .env and restart the dev server.',
+    );
+  }
+  return CLIENT_ID;
+}
+
+export function getCurrentUser(): UserProfile | null {
+  if (userProfile) return userProfile;
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed.profile) userProfile = parsed.profile;
+    }
+  } catch {}
+  return userProfile;
+}
+
+export function isSignedIn(): boolean {
+  return !!readCachedToken();
+}
+
+/**
+ * Returns a valid access token, re-prompting the user silently if the
+ * cached one is expired. Throws if no token can be obtained.
+ */
+export async function getAccessToken(interactive = false): Promise<string> {
+  const cached = readCachedToken();
+  if (cached) return cached.token;
+
+  await loadGis();
+
+  return new Promise<string>((resolve, reject) => {
+    const client = window.google!.accounts.oauth2.initTokenClient({
+      client_id: getClientId(),
+      scope: `${DRIVE_SCOPE} ${PROFILE_SCOPES}`,
+      callback: async (resp) => {
+        if (resp.error || !resp.access_token) {
+          reject(new Error(resp.error ?? 'No access token'));
+          return;
+        }
+        // Fetch the user profile once we have a token.
+        const profileRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+          headers: { Authorization: `Bearer ${resp.access_token}` },
+        });
+        const profile: UserProfile = profileRes.ok
+          ? await profileRes.json().then((p) => ({
+              email: p.email,
+              name: p.name ?? p.email,
+              picture: p.picture,
+            }))
+          : { email: 'unknown', name: 'Usuario' };
+        storeToken(resp.access_token, resp.expires_in, profile);
+        resolve(resp.access_token);
+      },
+      error_callback: (e) => reject(new Error(e.message ?? e.type)),
+    });
+    // `prompt:''` lets Google re-auth silently if there's an active session;
+    // interactive=true forces the consent screen the first time.
+    client.requestAccessToken({ prompt: interactive ? 'consent' : '' });
+  });
+}
+
+export async function signIn(): Promise<UserProfile> {
+  await getAccessToken(true);
+  return getCurrentUser()!;
+}
+
+export async function signOut(): Promise<void> {
+  const cached = readCachedToken();
+  if (cached?.token) {
+    await loadGis().catch(() => {});
+    try {
+      window.google?.accounts.oauth2.revoke(cached.token);
+    } catch {}
+  }
+  memoryToken = null;
+  userProfile = null;
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+  } catch {}
+}

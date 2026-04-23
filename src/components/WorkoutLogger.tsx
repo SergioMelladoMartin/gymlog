@@ -1,5 +1,23 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Category, Exercise, TrainingSet } from '../lib/queries';
+import type { Category } from '../lib/types';
+import type { ExerciseExtra as Exercise, TrainingSetEx } from '../lib/queries';
+import {
+  createExercise as qCreateExercise,
+  createSet as qCreateSet,
+  deleteSet as qDeleteSet,
+  getSetsForDate as qGetSets,
+  setWorkoutComment as qSetComment,
+  updateSet as qUpdateSet,
+} from '../lib/queries';
+
+// Runtime set shape used by the logger — extended query type with PR flags
+// and the legacy `is_personal_record` for backwards compat with the UI.
+type TrainingSet = TrainingSetEx & {
+  pr_weight?: boolean | number;
+  pr_1rm?: boolean | number;
+  pr_reps?: boolean | number;
+  is_personal_record?: number;
+};
 
 interface Props {
   date: string;
@@ -23,6 +41,17 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
   const [commentDirty, setCommentDirty] = useState(false);
   const [editingSetId, setEditingSetId] = useState<number | null>(null);
 
+  // Sync incoming props when the parent finishes loading data from the
+  // in-browser db. `useState(initialSets)` only reads props on first render,
+  // so without this the logger stayed empty on the very first paint of the
+  // day view (DayView's useEffect populates props one tick after mount).
+  useEffect(() => { setSets(initialSets); }, [initialSets]);
+  useEffect(() => { setExercises(initialExercises); }, [initialExercises]);
+  useEffect(() => {
+    setComment(initialComment ?? '');
+    setCommentDirty(false);
+  }, [initialComment]);
+
   const categoryById = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories]);
   const isCardioExercise = (exerciseId: number) => {
     const ex = exercises.find((e) => e.id === exerciseId);
@@ -42,135 +71,51 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
     return order.map((id) => ({ exerciseId: id, sets: map.get(id)! }));
   }, [sets]);
 
+  // All mutations now go through the in-browser SQLite db. Reads are
+  // synchronous and instant, so there's no optimistic/rollback dance —
+  // we just refetch from the local DB after each write.
+
   useEffect(() => {
     if (!commentDirty) return;
     const t = setTimeout(() => {
-      fetch('/api/workouts/comment', {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ date, body: comment }),
-      });
+      try { qSetComment(date, comment); } catch (e) { console.error(e); }
       setCommentDirty(false);
     }, 600);
     return () => clearTimeout(t);
   }, [comment, commentDirty, date]);
 
-  async function refreshSets() {
-    const res = await fetch(`/api/sets?date=${date}`);
-    if (!res.ok) return;
-    setSets((await res.json()) as TrainingSet[]);
+  function refreshSets() {
+    setSets(qGetSets(date) as TrainingSet[]);
   }
 
-  function buildOptimisticSet(
-    exerciseId: number,
-    tempId: number,
-    patch: Partial<TrainingSet>,
-  ): TrainingSet {
-    const exercise = exercises.find((e) => e.id === exerciseId)!;
-    return {
-      id: tempId,
+  function addSet(exerciseId: number, weight: number, reps: number) {
+    qCreateSet({ exercise_id: exerciseId, date, weight_kg: weight, reps });
+    refreshSets();
+  }
+
+  function addCardioSet(exerciseId: number, durationSec: number, distanceM: number) {
+    qCreateSet({
       exercise_id: exerciseId,
-      exercise_name: exercise.name,
-      category_id: exercise.category_id,
-      category_color: exercise.category_color,
       date,
-      weight_kg: 0,
-      reps: 0,
-      distance_m: 0,
-      duration_seconds: 0,
-      is_personal_record: 0,
-      position: 0,
-      ...patch,
-    };
-  }
-
-  async function postSet(
-    exerciseId: number,
-    tempId: number,
-    payload: Record<string, number>,
-  ) {
-    try {
-      const res = await fetch('/api/sets', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ exercise_id: exerciseId, date, ...payload }),
-      });
-      if (!res.ok) throw new Error('POST failed');
-      const data = await res.json();
-      const prChanged = data.pr_weight || data.pr_1rm || data.pr_reps;
-
-      if (prChanged) {
-        // A PR shifted — the previous holder lost its flag. Resync the day.
-        await refreshSets();
-      } else {
-        // Just swap the temp id for the real one.
-        setSets((prev) =>
-          prev.map((s) =>
-            s.id === tempId ? { ...s, id: data.id, position: data.position } : s,
-          ),
-        );
-      }
-    } catch {
-      // Roll back the optimistic append.
-      setSets((prev) => prev.filter((s) => s.id !== tempId));
-      alert('No se pudo guardar la serie. Revisa la conexión.');
-    }
-  }
-
-  async function addSet(exerciseId: number, weight: number, reps: number) {
-    const tempId = -Date.now();
-    setSets((prev) => [...prev, buildOptimisticSet(exerciseId, tempId, { weight_kg: weight, reps })]);
-    await postSet(exerciseId, tempId, { weight_kg: weight, reps });
-  }
-
-  async function addCardioSet(exerciseId: number, durationSec: number, distanceM: number) {
-    const tempId = -Date.now();
-    setSets((prev) => [
-      ...prev,
-      buildOptimisticSet(exerciseId, tempId, { duration_seconds: durationSec, distance_m: distanceM }),
-    ]);
-    await postSet(exerciseId, tempId, {
       weight_kg: 0,
       reps: 0,
       duration_seconds: durationSec,
       distance_m: distanceM,
     });
+    refreshSets();
   }
 
-  async function deleteSet(id: number) {
-    const prev = sets;
-    const had = prev.find((s) => s.id === id);
-    setSets((cur) => cur.filter((s) => s.id !== id));
-    try {
-      const res = await fetch(`/api/sets/${id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error('DELETE failed');
-      // If the deleted set held any PR, refetch so the runner-up picks it up.
-      if (had && (had.pr_weight || had.pr_1rm || had.pr_reps)) await refreshSets();
-    } catch {
-      setSets(prev);
-      alert('No se pudo borrar la serie.');
-    }
+  function deleteSet(id: number) {
+    qDeleteSet(id);
+    refreshSets();
   }
 
-  async function updateSet(
+  function updateSet(
     id: number,
     patch: Partial<Pick<TrainingSet, 'weight_kg' | 'reps' | 'duration_seconds' | 'distance_m'>>,
   ) {
-    const prev = sets;
-    setSets((cur) => cur.map((s) => (s.id === id ? { ...s, ...patch } : s)));
-    try {
-      const res = await fetch(`/api/sets/${id}`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(patch),
-      });
-      if (!res.ok) throw new Error('PATCH failed');
-      // PR flags may have shifted on weight/reps edits.
-      if ('weight_kg' in patch || 'reps' in patch) await refreshSets();
-    } catch {
-      setSets(prev);
-      alert('No se pudo guardar el cambio.');
-    }
+    qUpdateSet(id, patch);
+    refreshSets();
   }
 
   function selectExercise(id: number) {
@@ -179,19 +124,25 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
   }
 
   async function createExercise(name: string, categoryId: number): Promise<Exercise | null> {
-    const res = await fetch('/api/exercises', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name, category_id: categoryId }),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: 'Error al crear' }));
-      alert(err.error || 'Error al crear ejercicio');
+    try {
+      const id = qCreateExercise(name, categoryId);
+      const cat = categories.find((c) => c.id === categoryId);
+      const ex: Exercise = {
+        id,
+        name,
+        category_id: categoryId,
+        category_name: cat?.name ?? '',
+        category_color: cat?.color ?? null,
+        notes: null,
+        is_favorite: false,
+        last_used: null,
+      };
+      setExercises((prev) => [...prev, ex]);
+      return ex;
+    } catch (e: any) {
+      alert(e?.message ?? 'Error al crear ejercicio');
       return null;
     }
-    const ex = (await res.json()) as Exercise;
-    setExercises((prev) => [...prev, ex]);
-    return ex;
   }
 
   const selectedExercise = selectedExerciseId != null ? exercises.find((e) => e.id === selectedExerciseId) ?? null : null;
@@ -237,7 +188,7 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
         <div className="flex items-center justify-between px-4 pt-4">
           <div className="section-title">Ejercicio</div>
           {selectedExercise && (
-            <a href={`/exercise/${selectedExercise.id}`} className="text-xs text-muted hover:text-fg">
+            <a href={`/exercise?id=${selectedExercise.id}`} className="text-xs text-muted hover:text-fg">
               histórico →
             </a>
           )}
@@ -314,7 +265,7 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
                 style={{ boxShadow: `inset 3px 0 0 ${catColor}` }}
               >
                 <header className="flex items-center justify-between gap-2 px-4 py-3">
-                  <a href={`/exercise/${exerciseId}`} className="min-w-0 truncate font-semibold tracking-tight hover:underline">
+                  <a href={`/exercise?id=${exerciseId}`} className="min-w-0 truncate font-semibold tracking-tight hover:underline">
                     {ex?.name ?? `#${exerciseId}`}
                   </a>
                   <div className="flex shrink-0 items-center gap-2">

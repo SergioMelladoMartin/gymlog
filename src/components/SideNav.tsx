@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { getCurrentUser, signOut, type UserProfile } from '../lib/auth';
+import { importBytes, resetLocal, scheduleSync } from '../lib/sqlite';
 
 type NavKey = 'today' | 'calendar' | 'diary' | 'stats' | 'exercises';
 
 interface Props {
   active: NavKey;
-  userName: string;
-  userEmail: string;
 }
 
 interface Item { key: NavKey; href: string; label: string; icon: JSX.Element }
@@ -58,15 +58,17 @@ const ITEMS: Item[] = [
   },
 ];
 
-export default function SideNav({ active, userName, userEmail }: Props) {
+export default function SideNav({ active }: Props) {
   const [open, setOpen] = useState(false);
   const [theme, setTheme] = useState<'light' | 'dark'>('dark');
   const [mounted, setMounted] = useState(false);
+  const [user, setUser] = useState<UserProfile | null>(null);
 
   useEffect(() => {
     setMounted(true);
     const t = (document.documentElement.getAttribute('data-theme') as 'light' | 'dark') || 'dark';
     setTheme(t);
+    setUser(getCurrentUser());
   }, []);
 
   useEffect(() => {
@@ -88,16 +90,24 @@ export default function SideNav({ active, userName, userEmail }: Props) {
   }
 
   async function logout() {
-    try {
-      await fetch('/api/auth/sign-out', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: '{}',
-      });
-    } catch {}
+    await signOut();
+    await resetLocal();
     window.location.replace('/login');
   }
 
+  async function handleImport(file: File) {
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      await importBytes(bytes);
+      await scheduleSync(true);
+      window.location.reload();
+    } catch (e: any) {
+      alert(e?.message ?? 'Error al importar backup');
+    }
+  }
+
+  const userName = user?.name ?? 'Usuario';
+  const userEmail = user?.email ?? '';
   const initial = (userName || userEmail || '?').trim().charAt(0).toUpperCase();
 
   const drawerStyle: React.CSSProperties = {
@@ -188,6 +198,24 @@ export default function SideNav({ active, userName, userEmail }: Props) {
               <div className="truncate text-[11px] text-muted">{userEmail}</div>
             </div>
           </div>
+
+          <label className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-sm text-fg transition hover:bg-elevated">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="17 8 12 3 7 8" />
+              <line x1="12" x2="12" y1="3" y2="15" />
+            </svg>
+            Importar backup
+            <input
+              type="file"
+              accept=".fitnotes,.db,.sqlite,application/x-sqlite3"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) handleImport(f);
+              }}
+            />
+          </label>
 
           <button
             type="button"

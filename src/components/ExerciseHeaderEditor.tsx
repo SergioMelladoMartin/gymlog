@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import type { Category } from '../lib/queries';
+import type { Category } from '../lib/types';
+import { updateExercise } from '../lib/queries';
 
 interface Props {
   exerciseId: number;
@@ -23,21 +24,17 @@ export default function ExerciseHeaderEditor({
   const [catId, setCatId] = useState(initialCategoryId);
   const [saving, setSaving] = useState(false);
 
-  async function save(e: React.FormEvent) {
+  function save(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim() || saving) return;
     setSaving(true);
-    const res = await fetch(`/api/exercises/${exerciseId}`, {
-      method: 'PATCH',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: name.trim(), category_id: catId }),
-    });
-    setSaving(false);
-    if (res.ok) {
+    try {
+      updateExercise(exerciseId, { name: name.trim(), category_id: catId });
       window.location.reload();
-    } else {
-      const err = await res.json().catch(() => ({ error: 'Error al guardar' }));
-      alert(err.error || 'Error al guardar');
+    } catch (err: any) {
+      alert(err?.message ?? 'Error al guardar');
+    } finally {
+      setSaving(false);
     }
   }
 

@@ -5,11 +5,10 @@ import SideNav from '../components/SideNav';
 
 interface Props {
   title?: string;
-  activeNav?: 'today' | 'calendar' | 'diary' | 'stats' | 'exercises';
+  activeNav?: 'today' | 'calendar' | 'diary' | 'stats' | 'exercises' | 'login';
 }
 
 const { title = 'gymlog', activeNav = 'today' } = Astro.props;
-const user = Astro.locals.user;
 
 const navTitle = {
   today: 'Hoy',
@@ -17,6 +16,7 @@ const navTitle = {
   diary: 'Diario',
   exercises: 'Ejercicios',
   stats: 'Estadísticas',
+  login: 'Acceso',
 }[activeNav];
 ---
 <html lang="es">
@@ -25,6 +25,7 @@ const navTitle = {
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#0b0b0f" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="preconnect" href="https://rsms.me/" />
     <link rel="stylesheet" href="https://rsms.me/inter/inter.css" />
     <title>{title}</title>
@@ -34,27 +35,17 @@ const navTitle = {
         try {
           var stored = localStorage.getItem('theme');
           var sysDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-          var theme = stored || (sysDark ? 'dark' : 'light');
-          document.documentElement.setAttribute('data-theme', theme);
-        } catch (e) {
-          document.documentElement.setAttribute('data-theme', 'dark');
-        }
+          document.documentElement.setAttribute('data-theme', stored || (sysDark ? 'dark' : 'light'));
+          var accent = localStorage.getItem('accent');
+          if (accent) document.documentElement.setAttribute('data-accent', accent);
+        } catch (e) {}
       })();
     </script>
   </head>
   <body class="min-h-dvh">
     <header class="sticky top-0 z-30 border-b border-border/70 backdrop-blur-xl" style="background: color-mix(in srgb, var(--color-bg) 75%, transparent);">
       <div class="mx-auto flex max-w-3xl items-center gap-3 px-4 py-3">
-        {user && (
-          <SideNav
-            client:load
-            transition:persist="sidenav"
-            active={activeNav}
-            userName={user.name}
-            userEmail={user.email}
-          />
-        )}
-
+        {activeNav !== 'login' && <SideNav client:load transition:persist="sidenav" active={activeNav} />}
         <div class="flex min-w-0 flex-1 items-center gap-2">
           <a href="/" class="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-accent text-ink" aria-label="Ir a Hoy">
             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">

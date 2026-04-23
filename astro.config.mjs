@@ -1,17 +1,18 @@
 // @ts-check
 import { defineConfig } from 'astro/config';
 import react from '@astrojs/react';
-import vercel from '@astrojs/vercel';
 import tailwindcss from '@tailwindcss/vite';
 
+// Fully static: no server, no API routes. All data lives in the user's
+// browser (sqlite-wasm + OPFS) and syncs to their Google Drive.
 export default defineConfig({
-  output: 'server',
-  adapter: vercel({ regions: ['dub1'] }),
+  output: 'static',
   integrations: [react()],
-  // `load` strategy prefetches every internal link the moment the page is
-  // rendered. Essential for mobile where there's no hover. Combined with
-  // ClientRouter's view-transitions this makes most navigations feel
-  // instant because the HTML is already sitting in the browser cache.
   prefetch: { prefetchAll: true, defaultStrategy: 'load' },
-  vite: { plugins: [tailwindcss()] },
+  vite: {
+    plugins: [tailwindcss()],
+    // sqlite-wasm ships a .wasm asset; keep it untouched by the bundler.
+    optimizeDeps: { exclude: ['@sqlite.org/sqlite-wasm'] },
+    worker: { format: 'es' },
+  },
 });
