@@ -2,12 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Category } from '../lib/types';
 import type { ExerciseExtra as Exercise, TrainingSetEx } from '../lib/queries';
 import {
-  copySetsFromDate,
   createExercise as qCreateExercise,
   createSet as qCreateSet,
   deleteSet as qDeleteSet,
   duplicateSet as qDuplicateSet,
-  getLastTrainingDateBefore,
   getSetsForDate as qGetSets,
   setWorkoutComment as qSetComment,
   updateSet as qUpdateSet,
@@ -138,29 +136,6 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
     vibrate(10);
   }
 
-  // "Repetir último entreno": only available when today is empty + a prior
-  // training day exists. Copies the full exercise/weight/reps/cardio payload.
-  const [copying, setCopying] = useState(false);
-  const lastTrainingDate = useMemo(
-    () => (sets.length === 0 ? getLastTrainingDateBefore(date) : null),
-    // getLastTrainingDateBefore is pure against the DB; re-run when `date`
-    // changes or whenever the set list refreshes.
-    [date, sets.length],
-  );
-  function copyLastWorkout() {
-    if (!lastTrainingDate || copying) return;
-    setCopying(true);
-    try {
-      const n = copySetsFromDate(lastTrainingDate, date);
-      if (n > 0) {
-        refreshSets();
-        vibrate([10, 40, 10]);
-      }
-    } finally {
-      setCopying(false);
-    }
-  }
-
   function deleteSet(id: number) {
     qDeleteSet(id);
     refreshSets();
@@ -267,27 +242,9 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
       </button>
 
       {allCards.length === 0 ? (
-        <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-border bg-card/40 px-4 py-10 text-center">
-          <div className="grid h-14 w-14 place-items-center rounded-full bg-accent/15 text-3xl">💪</div>
-          <div>
-            <div className="text-base font-semibold tracking-tight">{t('workout.noExercisesTitle')}</div>
-            <div className="mt-1 text-sm text-muted">{t('workout.noExercisesBody')}</div>
-          </div>
-          {lastTrainingDate && (
-            <button
-              type="button"
-              onClick={copyLastWorkout}
-              disabled={copying}
-              className="mt-1 inline-flex items-center gap-2 rounded-full border border-border bg-card px-4 py-2 text-xs font-medium text-fg transition hover:border-strong hover:bg-elevated disabled:opacity-40"
-              title={t('workout.copyYesterdayHint', { date: relativeDate(lastTrainingDate) })}
-            >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M17 2l4 4-4 4" /><path d="M3 11v-1a4 4 0 0 1 4-4h14" />
-                <path d="M7 22l-4-4 4-4" /><path d="M21 13v1a4 4 0 0 1-4 4H3" />
-              </svg>
-              {copying ? t('workout.copying') : t('workout.copyYesterday')}
-            </button>
-          )}
+        <div className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border bg-card/40 px-4 py-10 text-center">
+          <div className="text-base font-semibold tracking-tight">{t('workout.noExercisesTitle')}</div>
+          <div className="text-sm text-muted">{t('workout.noExercisesBody')}</div>
         </div>
       ) : (
         <div className="flex flex-col gap-3">
