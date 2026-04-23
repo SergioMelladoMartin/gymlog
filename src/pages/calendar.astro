@@ -1,0 +1,7 @@
+---
+import Layout from '../layouts/Layout.astro';
+import CalendarView from '../components/CalendarView';
+---
+<Layout title="Calendario · gymlog" activeNav="calendar">
+  <CalendarView client:only="react" />
+</Layout>

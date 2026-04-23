@@ -1,0 +1,7 @@
+---
+import Layout from '../layouts/Layout.astro';
+import DiaryView from '../components/DiaryView';
+---
+<Layout title="Diario · gymlog" activeNav="diary">
+  <DiaryView client:only="react" />
+</Layout>

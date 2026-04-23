@@ -1,0 +1,7 @@
+---
+import Layout from '../layouts/Layout.astro';
+import ExercisesView from '../components/ExercisesView';
+---
+<Layout title="Ejercicios · gymlog" activeNav="exercises">
+  <ExercisesView client:only="react" />
+</Layout>
