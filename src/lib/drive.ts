@@ -1,7 +1,7 @@
 // Google Drive appdata helpers for the raw FitNotes SQLite file.
 // Keeps a single `gymlog.fitnotes` blob in the hidden appData folder.
 
-import { getAccessToken } from './auth';
+import { getAccessToken, reconsent } from './auth';
 
 const FILE_NAME = 'gymlog.fitnotes';
 const DRIVE_API = 'https://www.googleapis.com/drive/v3';
@@ -16,7 +16,7 @@ async function authHeaders(extra: Record<string, string> = {}): Promise<Headers>
   return h;
 }
 
-async function findFile(): Promise<{ id: string; modifiedTime: string; size: number } | null> {
+async function findFile(retryOn403 = true): Promise<{ id: string; modifiedTime: string; size: number } | null> {
   const headers = await authHeaders();
   const params = new URLSearchParams({
     spaces: 'appDataFolder',
@@ -25,7 +25,19 @@ async function findFile(): Promise<{ id: string; modifiedTime: string; size: num
     pageSize: '1',
   });
   const res = await fetch(`${DRIVE_API}/files?${params}`, { headers });
-  if (!res.ok) throw new Error(`drive list failed: ${res.status}`);
+  if (res.status === 403 && retryOn403) {
+    // Token lacks drive.appdata. Re-prompt for consent with the Drive
+    // checkbox and try once more.
+    await reconsent();
+    return findFile(false);
+  }
+  if (!res.ok) {
+    throw new Error(
+      res.status === 403
+        ? 'Google rechazó el acceso a Drive. Asegúrate de haber añadido el scope `drive.appdata` en tu OAuth consent screen y de haber marcado la casilla al iniciar sesión.'
+        : `drive list failed: ${res.status}`,
+    );
+  }
   const data = await res.json();
   const file = data.files?.[0];
   if (!file) return null;

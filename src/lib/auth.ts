@@ -138,7 +138,17 @@ export async function getAccessToken(interactive = false): Promise<string> {
           reject(new Error(resp.error ?? 'No access token'));
           return;
         }
-        // Fetch the user profile once we have a token.
+        // Validate that the user actually granted the Drive scope — Google
+        // will happily issue a token for a subset of requested scopes if the
+        // user unticks a checkbox on the consent screen.
+        if (!resp.scope?.includes(DRIVE_SCOPE)) {
+          reject(
+            new Error(
+              'Faltan permisos de Drive. En la pantalla de Google, marca la casilla "Ver, crear y eliminar datos de esta aplicación en tu Google Drive". Si no aparece, añade el scope drive.appdata en tu OAuth consent screen.',
+            ),
+          );
+          return;
+        }
         const profileRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
           headers: { Authorization: `Bearer ${resp.access_token}` },
         });
@@ -154,10 +164,17 @@ export async function getAccessToken(interactive = false): Promise<string> {
       },
       error_callback: (e) => reject(new Error(e.message ?? e.type)),
     });
-    // `prompt:''` lets Google re-auth silently if there's an active session;
-    // interactive=true forces the consent screen the first time.
+    // prompt:'consent' re-asks for permissions (useful after a 403 to let
+    // the user re-tick the Drive checkbox). Empty = silent re-auth.
     client.requestAccessToken({ prompt: interactive ? 'consent' : '' });
   });
+}
+
+/** Force a re-consent flow (used after a 403 from Drive). */
+export async function reconsent(): Promise<string> {
+  memoryToken = null;
+  try { localStorage.removeItem(STORAGE_KEY); } catch {}
+  return getAccessToken(true);
 }
 
 export async function signIn(): Promise<UserProfile> {
