@@ -509,11 +509,15 @@ function ExercisePicker({
   }, [exercises]);
 
   // Exercises to render in the list view (search or category picked).
+  // When browsing a specific muscle group, alphabetical order is more useful
+  // than "recently used"; the latter still applies to global searches where
+  // surfacing the last exercises you've logged saves taps.
   const visibleExercises = useMemo(() => {
     let list = exercises;
     if (stepCategory !== null) list = list.filter((e) => e.category_id === stepCategory);
     if (isSearching) list = list.filter((e) => e.name.toLowerCase().includes(q));
     return [...list].sort((a, b) => {
+      if (stepCategory !== null) return a.name.localeCompare(b.name);
       if (a.last_used && b.last_used) return a.last_used < b.last_used ? 1 : -1;
       if (a.last_used) return -1;
       if (b.last_used) return 1;

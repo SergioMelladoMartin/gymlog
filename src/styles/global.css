@@ -55,6 +55,36 @@
     radial-gradient(800px 400px at -10% 10%, rgba(59, 130, 246, 0.05), transparent 60%);
 }
 
+/* Accent variants — override lime with the selected colour via data-accent.
+   `--color-ink` stays dark enough to read on the bg colour (WCAG AA for
+   buttons / badges). Applied on top of any theme. */
+:root[data-accent='rose'] {
+  --color-accent: #f472b6;
+  --color-accent-soft: rgba(244, 114, 182, 0.22);
+  --color-ink: #3b0820;
+}
+:root[data-accent='red'] {
+  --color-accent: #f87171;
+  --color-accent-soft: rgba(248, 113, 113, 0.22);
+  --color-ink: #3a0606;
+}
+:root[data-accent='sky'] {
+  --color-accent: #7dd3fc;
+  --color-accent-soft: rgba(125, 211, 252, 0.22);
+  --color-ink: #04252f;
+}
+:root[data-accent='violet'] {
+  --color-accent: #c4b5fd;
+  --color-accent-soft: rgba(196, 181, 253, 0.22);
+  --color-ink: #1e0b4d;
+}
+/* Mono = black on light / white on dark — "no colour" option. */
+:root[data-accent='mono'] {
+  --color-accent: var(--color-fg);
+  --color-accent-soft: color-mix(in srgb, var(--color-fg) 12%, transparent);
+  --color-ink: var(--color-bg);
+}
+
 /* Reset/base styles must live inside @layer base so Tailwind utility classes
    (which sit in @layer utilities) can override them. Un-layered rules beat
    any @layer, which was making `button { color: inherit }` win over
@@ -68,6 +98,13 @@
     -webkit-text-size-adjust: 100%;
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
+  }
+
+  /* When the SideNav component detects a desktop viewport it adds
+     `has-sidenav` on <html>. Shift page content right so the always-open
+     sidebar doesn't cover it. */
+  html.has-sidenav body {
+    padding-left: 260px;
   }
 
   body {

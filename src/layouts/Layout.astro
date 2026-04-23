@@ -37,9 +37,16 @@ const navTitle = {
           var sysDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
           document.documentElement.setAttribute('data-theme', stored || (sysDark ? 'dark' : 'light'));
           var accent = localStorage.getItem('accent');
-          if (accent) document.documentElement.setAttribute('data-accent', accent);
+          if (accent && accent !== 'lime') document.documentElement.setAttribute('data-accent', accent);
         } catch (e) {}
       })();
+    </script>
+    <script is:inline>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function () {
+          navigator.serviceWorker.register('/sw.js').catch(function () {});
+        });
+      }
     </script>
   </head>
   <body class="min-h-dvh">

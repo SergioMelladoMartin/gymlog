@@ -125,7 +125,7 @@ function createEmptyDatabase(): Database {
       comments TEXT
     );
   `);
-  // Default categories with FitNotes-style signed 32-bit ARGB colours.
+  // Default categories (FitNotes-style signed 32-bit ARGB colours).
   const cats: [string, number, number][] = [
     ['Pecho',     -11226442, 1],
     ['Tríceps',   -13330213, 2],
@@ -137,8 +137,129 @@ function createEmptyDatabase(): Database {
     ['Core',     -10453621, 8],
     ['Antebrazo', -15294331, 9],
   ];
+  const catId: Record<string, number> = {};
   for (const [name, colour, sort] of cats) {
     db.exec({ sql: 'INSERT INTO Category (name, colour, sort_order) VALUES (?, ?, ?)', bind: [name, colour, sort] });
+    catId[name] = Number(db.selectValue('SELECT last_insert_rowid()'));
+  }
+
+  // Seed ~90 of the most common gym exercises so new users don't start from
+  // an empty catalogue. All names normalised to "Nombre (implemento)".
+  const seed: Array<[cat: string, name: string]> = [
+    // ── Pecho ─────────────────────────────────────────────────────────
+    ['Pecho', 'Press Banca Plano (barra)'],
+    ['Pecho', 'Press Banca Inclinado (barra)'],
+    ['Pecho', 'Press Banca Declinado (barra)'],
+    ['Pecho', 'Press Banca Plano (mancuernas)'],
+    ['Pecho', 'Press Banca Inclinado (mancuernas)'],
+    ['Pecho', 'Press Banca Plano (multipower)'],
+    ['Pecho', 'Press Pecho (máquina)'],
+    ['Pecho', 'Aperturas (mancuernas)'],
+    ['Pecho', 'Cruce Poleas Altas'],
+    ['Pecho', 'Cruce Poleas Bajas'],
+    ['Pecho', 'Contracción Pecho (máquina)'],
+    ['Pecho', 'Pull Over (mancuerna)'],
+    ['Pecho', 'Flexiones'],
+    ['Pecho', 'Fondos en Paralelas'],
+    // ── Espalda ───────────────────────────────────────────────────────
+    ['Espalda', 'Dominadas'],
+    ['Espalda', 'Dominadas Asistidas (máquina)'],
+    ['Espalda', 'Jalón al Pecho (polea)'],
+    ['Espalda', 'Jalón al Pecho Agarre Cerrado'],
+    ['Espalda', 'Jalón al Pecho Agarre Supino'],
+    ['Espalda', 'Remo con Barra'],
+    ['Espalda', 'Remo Unilateral (mancuerna)'],
+    ['Espalda', 'Remo Sentado (polea)'],
+    ['Espalda', 'Remo Seal (mancuernas)'],
+    ['Espalda', 'Remo en T'],
+    ['Espalda', 'Remo (máquina)'],
+    ['Espalda', 'Peso Muerto (barra)'],
+    ['Espalda', 'Peso Muerto Rumano (barra)'],
+    ['Espalda', 'Hiperextensiones'],
+    ['Espalda', 'Encogimientos Trapecio (mancuernas)'],
+    ['Espalda', 'Face Pull (polea)'],
+    // ── Pierna ────────────────────────────────────────────────────────
+    ['Pierna', 'Sentadilla (barra)'],
+    ['Pierna', 'Sentadilla Frontal (barra)'],
+    ['Pierna', 'Hack Squat (máquina)'],
+    ['Pierna', 'Prensa (máquina)'],
+    ['Pierna', 'Extensión Cuádriceps (máquina)'],
+    ['Pierna', 'Femoral Tumbado (máquina)'],
+    ['Pierna', 'Femoral Sentado (máquina)'],
+    ['Pierna', 'Peso Muerto Rumano (mancuernas)'],
+    ['Pierna', 'Zancadas (mancuernas)'],
+    ['Pierna', 'Zancadas Caminando'],
+    ['Pierna', 'Sentadilla Búlgara (mancuernas)'],
+    ['Pierna', 'Hip Thrust (barra)'],
+    ['Pierna', 'Hip Thrust (máquina)'],
+    ['Pierna', 'Gemelos de Pie (máquina)'],
+    ['Pierna', 'Gemelos Sentado (máquina)'],
+    ['Pierna', 'Gemelos en Prensa'],
+    ['Pierna', 'Abductores (máquina)'],
+    ['Pierna', 'Aductores (máquina)'],
+    ['Pierna', 'Patada Glúteo (máquina)'],
+    // ── Hombro ────────────────────────────────────────────────────────
+    ['Hombro', 'Press Militar (barra)'],
+    ['Hombro', 'Press Militar (mancuernas)'],
+    ['Hombro', 'Press Militar (multipower)'],
+    ['Hombro', 'Press Arnold (mancuernas)'],
+    ['Hombro', 'Press Hombro (máquina)'],
+    ['Hombro', 'Elevación Lateral (mancuernas)'],
+    ['Hombro', 'Elevación Lateral (polea)'],
+    ['Hombro', 'Elevación Lateral (máquina)'],
+    ['Hombro', 'Elevación Frontal (mancuernas)'],
+    ['Hombro', 'Pájaros (mancuernas)'],
+    ['Hombro', 'Pájaros (máquina)'],
+    // ── Bíceps ────────────────────────────────────────────────────────
+    ['Bíceps', 'Curl Bíceps (barra)'],
+    ['Bíceps', 'Curl Bíceps (mancuernas)'],
+    ['Bíceps', 'Curl Martillo (mancuernas)'],
+    ['Bíceps', 'Curl Predicador (barra)'],
+    ['Bíceps', 'Curl Predicador (máquina)'],
+    ['Bíceps', 'Curl Bíceps (polea)'],
+    ['Bíceps', 'Curl Concentrado (mancuerna)'],
+    ['Bíceps', 'Curl Araña (barra)'],
+    // ── Tríceps ───────────────────────────────────────────────────────
+    ['Tríceps', 'Press Francés (barra)'],
+    ['Tríceps', 'Press Francés (mancuernas)'],
+    ['Tríceps', 'Press Banca Cerrado (barra)'],
+    ['Tríceps', 'Tríceps Polea (barra recta)'],
+    ['Tríceps', 'Tríceps Polea (cuerda)'],
+    ['Tríceps', 'Tríceps Polea Unilateral'],
+    ['Tríceps', 'Patada Tríceps (mancuerna)'],
+    ['Tríceps', 'Fondos (máquina)'],
+    ['Tríceps', 'Fondos en Banco'],
+    // ── Core ──────────────────────────────────────────────────────────
+    ['Core', 'Plancha'],
+    ['Core', 'Plancha Lateral'],
+    ['Core', 'Crunch'],
+    ['Core', 'Crunch en Polea'],
+    ['Core', 'Abdominales (máquina)'],
+    ['Core', 'Elevaciones de Piernas'],
+    ['Core', 'Rueda Abdominal'],
+    ['Core', 'Russian Twist'],
+    ['Core', 'Lumbares (máquina)'],
+    // ── Antebrazo ─────────────────────────────────────────────────────
+    ['Antebrazo', 'Curl Antebrazo (barra)'],
+    ['Antebrazo', 'Curl Antebrazo Inverso'],
+    ['Antebrazo', 'Curl Antebrazo (mancuerna)'],
+    ['Antebrazo', 'Agarre Mancuernas'],
+    // ── Cardio ────────────────────────────────────────────────────────
+    ['Cardio', 'Cinta'],
+    ['Cardio', 'Correr'],
+    ['Cardio', 'Caminar'],
+    ['Cardio', 'Bici'],
+    ['Cardio', 'Bici Estática'],
+    ['Cardio', 'Elíptica'],
+    ['Cardio', 'Escalera'],
+    ['Cardio', 'Remo (cardio)'],
+    ['Cardio', 'Natación'],
+  ];
+  for (const [cat, name] of seed) {
+    db.exec({
+      sql: 'INSERT INTO exercise (name, category_id) VALUES (?, ?)',
+      bind: [name, catId[cat]],
+    });
   }
   return db;
 }
