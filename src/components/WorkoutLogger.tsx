@@ -41,6 +41,17 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
   const [commentDirty, setCommentDirty] = useState(false);
   const [editingSetId, setEditingSetId] = useState<number | null>(null);
 
+  // Sync incoming props when the parent finishes loading data from the
+  // in-browser db. `useState(initialSets)` only reads props on first render,
+  // so without this the logger stayed empty on the very first paint of the
+  // day view (DayView's useEffect populates props one tick after mount).
+  useEffect(() => { setSets(initialSets); }, [initialSets]);
+  useEffect(() => { setExercises(initialExercises); }, [initialExercises]);
+  useEffect(() => {
+    setComment(initialComment ?? '');
+    setCommentDirty(false);
+  }, [initialComment]);
+
   const categoryById = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories]);
   const isCardioExercise = (exerciseId: number) => {
     const ex = exercises.find((e) => e.id === exerciseId);
