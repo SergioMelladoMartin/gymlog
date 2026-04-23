@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { signOut } from '../lib/auth';
-import { importBytes, resetLocal, scheduleSync } from '../lib/sqlite';
+import { exportBytes, importBytes, resetLocal, scheduleSync } from '../lib/sqlite';
+import { useT } from '../hooks/useT';
+import { setLang, type Lang } from '../lib/i18n';
 
 const ACCENTS: Array<{ key: string; label: string; swatch: string }> = [
   { key: 'lime',   label: 'Lima',    swatch: '#a3e635' },
@@ -17,12 +19,14 @@ interface BeforeInstallPromptEvent extends Event {
 }
 
 export default function SettingsView() {
+  const { t, lang } = useT();
   const [theme, setTheme] = useState<'light' | 'dark'>('dark');
   const [accent, setAccent] = useState<string>('lime');
   const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null);
   const [isInstalled, setIsInstalled] = useState(false);
   const [ua, setUa] = useState<{ ios: boolean; android: boolean }>({ ios: false, android: false });
   const [importing, setImporting] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     setTheme((document.documentElement.getAttribute('data-theme') as 'light' | 'dark') || 'dark');
@@ -79,10 +83,37 @@ export default function SettingsView() {
     }
   }
 
+  function handleExport() {
+    setExporting(true);
+    try {
+      const bytes = exportBytes();
+      const blob = new Blob([bytes], { type: 'application/vnd.sqlite3' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const stamp = new Date().toISOString().slice(0, 10);
+      a.href = url;
+      a.download = `gymlog-${stamp}.fitnotes`;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        a.remove();
+        URL.revokeObjectURL(url);
+      }, 0);
+    } catch (e: any) {
+      alert(e?.message ?? 'Error al exportar');
+    } finally {
+      setExporting(false);
+    }
+  }
+
   async function logout() {
     await signOut();
     await resetLocal();
     window.location.replace('/login');
+  }
+
+  function pickLang(next: Lang) {
+    setLang(next);
   }
 
   return (
@@ -90,14 +121,14 @@ export default function SettingsView() {
       <div className="mb-4">
         <a href="/profile" className="mb-2 inline-flex items-center gap-1 text-sm text-muted transition hover:text-fg">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
-          Perfil
+          {t('nav.profile')}
         </a>
-        <h1 className="text-3xl font-semibold tracking-tight">Ajustes</h1>
+        <h1 className="text-3xl font-semibold tracking-tight">{t('settings.title')}</h1>
       </div>
 
-      {/* Theme + color */}
+      {/* Appearance */}
       <section className="card mb-4 p-4">
-        <div className="section-title mb-3">Apariencia</div>
+        <div className="section-title mb-3">{t('settings.appearance')}</div>
 
         <button
           type="button"
@@ -110,13 +141,13 @@ export default function SettingsView() {
             ) : (
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="4" /><path d="M12 2v2" /><path d="M12 20v2" /><path d="m4.93 4.93 1.41 1.41" /><path d="m17.66 17.66 1.41 1.41" /><path d="M2 12h2" /><path d="M20 12h2" /><path d="m6.34 17.66-1.41 1.41" /><path d="m19.07 4.93-1.41 1.41" /></svg>
             )}
-            Tema
+            {t('settings.theme')}
           </span>
-          <span className="text-muted">{theme === 'dark' ? 'Oscuro' : 'Claro'}</span>
+          <span className="text-muted">{theme === 'dark' ? t('settings.themeDark') : t('settings.themeLight')}</span>
         </button>
 
         <div className="mt-3 border-t border-border pt-3">
-          <div className="mb-2 px-2 text-xs text-muted">Color de acento</div>
+          <div className="mb-2 px-2 text-xs text-muted">{t('settings.accent')}</div>
           <div className="flex flex-wrap gap-2 px-2">
             {ACCENTS.map((a) => {
               const isActive = accent === a.key;
@@ -138,17 +169,38 @@ export default function SettingsView() {
             })}
           </div>
         </div>
+
+        <div className="mt-3 border-t border-border pt-3">
+          <div className="mb-2 px-2 text-xs text-muted">{t('settings.language')}</div>
+          <div className="flex gap-2 px-2">
+            {(['es', 'en'] as const).map((code) => {
+              const active = lang === code;
+              return (
+                <button
+                  key={code}
+                  type="button"
+                  onClick={() => pickLang(code)}
+                  className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition ${
+                    active
+                      ? 'border-accent/60 bg-accent/15 text-fg'
+                      : 'border-border bg-elevated text-muted hover:border-strong hover:text-fg'
+                  }`}
+                >
+                  {code === 'es' ? '🇪🇸 Español' : '🇬🇧 English'}
+                </button>
+              );
+            })}
+          </div>
+        </div>
       </section>
 
       {/* Install */}
       {!isInstalled && (
         <section className="card mb-4 p-4">
-          <div className="section-title mb-2">Instalar app</div>
+          <div className="section-title mb-2">{t('settings.install')}</div>
           {installEvent ? (
             <>
-              <p className="mb-3 text-sm text-muted">
-                Instala gymlog como app nativa. Se abrirá en su propia ventana sin barra del navegador.
-              </p>
+              <p className="mb-3 text-sm text-muted">{t('settings.installBlurb')}</p>
               <button
                 type="button"
                 onClick={promptInstall}
@@ -159,7 +211,7 @@ export default function SettingsView() {
                   <polyline points="7 10 12 15 17 10" />
                   <line x1="12" x2="12" y1="15" y2="3" />
                 </svg>
-                Instalar
+                {t('settings.installCta')}
               </button>
             </>
           ) : ua.ios ? (
@@ -184,17 +236,15 @@ export default function SettingsView() {
 
       {/* Backup */}
       <section className="card mb-4 p-4">
-        <div className="section-title mb-2">Backup</div>
-        <p className="mb-3 text-sm text-muted">
-          Reemplaza tu base de datos con un archivo <code>.fitnotes</code>. El nuevo archivo también se subirá a tu Drive.
-        </p>
-        <label className={`flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-border bg-elevated/40 px-4 py-2.5 text-sm font-medium transition hover:border-strong ${importing ? 'opacity-60 pointer-events-none' : ''}`}>
+        <div className="section-title mb-2">{t('settings.backup')}</div>
+        <p className="mb-3 text-sm text-muted">{t('settings.backupBlurb')}</p>
+        <label className={`mb-2 flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-border bg-elevated/40 px-4 py-2.5 text-sm font-medium transition hover:border-strong ${importing ? 'opacity-60 pointer-events-none' : ''}`}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
             <polyline points="17 8 12 3 7 8" />
             <line x1="12" x2="12" y1="3" y2="15" />
           </svg>
-          {importing ? 'Importando…' : 'Importar backup .fitnotes'}
+          {importing ? t('settings.importing') : t('settings.import')}
           <input
             type="file"
             accept=".fitnotes,.db,.sqlite,application/x-sqlite3"
@@ -205,6 +255,19 @@ export default function SettingsView() {
             }}
           />
         </label>
+        <button
+          type="button"
+          onClick={handleExport}
+          disabled={exporting}
+          className="flex w-full items-center justify-center gap-2 rounded-lg border border-border bg-card px-4 py-2.5 text-sm font-medium transition hover:border-strong hover:bg-elevated disabled:opacity-40"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="7 10 12 15 17 10" />
+            <line x1="12" x2="12" y1="15" y2="3" />
+          </svg>
+          {exporting ? t('settings.exporting') : t('settings.export')}
+        </button>
       </section>
 
       <button
@@ -217,7 +280,7 @@ export default function SettingsView() {
           <polyline points="16 17 21 12 16 7" />
           <line x1="21" x2="9" y1="12" y2="12" />
         </svg>
-        Cerrar sesión
+        {t('settings.signOut')}
       </button>
     </>
   );

@@ -391,12 +391,47 @@ export function getDb(): Database {
 
 // ── sync to Drive (debounced) ──────────────────────────────────────────
 
+export type SyncState = 'idle' | 'dirty' | 'syncing' | 'error';
+const LS_LAST_SYNC = 'gymlog-last-sync';
+
 let dirty = false;
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 let inFlight: Promise<void> | null = null;
+let syncState: SyncState = 'idle';
+let lastSyncAt: number | null = (() => {
+  try {
+    const raw = localStorage.getItem(LS_LAST_SYNC);
+    return raw ? Number(raw) : null;
+  } catch { return null; }
+})();
+const syncListeners = new Set<(info: { state: SyncState; lastSyncAt: number | null }) => void>();
+
+function setSyncState(next: SyncState) {
+  syncState = next;
+  for (const l of syncListeners) l({ state: syncState, lastSyncAt });
+}
+function setLastSyncAt(ts: number | null) {
+  lastSyncAt = ts;
+  try {
+    if (ts) localStorage.setItem(LS_LAST_SYNC, String(ts));
+    else localStorage.removeItem(LS_LAST_SYNC);
+  } catch {}
+  for (const l of syncListeners) l({ state: syncState, lastSyncAt });
+}
+
+export function getSyncInfo(): { state: SyncState; lastSyncAt: number | null } {
+  return { state: syncState, lastSyncAt };
+}
+
+export function onSyncChange(fn: (info: { state: SyncState; lastSyncAt: number | null }) => void): () => void {
+  syncListeners.add(fn);
+  fn({ state: syncState, lastSyncAt });
+  return () => { syncListeners.delete(fn); };
+}
 
 export function markDirty() {
   dirty = true;
+  if (syncState !== 'syncing') setSyncState('dirty');
   if (flushTimer) return;
   flushTimer = setTimeout(() => flushToDrive().catch(() => {}), 5000);
 }
@@ -407,6 +442,7 @@ async function flushToDrive(): Promise<void> {
   if (inFlight) return inFlight;
   if (!isSignedIn()) { dirty = false; return; }
   dirty = false;
+  setSyncState('syncing');
   inFlight = (async () => {
     try {
       const bytes = serialize(db!);
@@ -415,8 +451,11 @@ async function flushToDrive(): Promise<void> {
       // Record the new remote state so future pull-checks know this is "ours".
       const meta = await getRemoteMeta().catch(() => null);
       if (meta) writeStoredMeta(meta);
+      setLastSyncAt(Date.now());
+      setSyncState(dirty ? 'dirty' : 'idle');
     } catch (e) {
       dirty = true;
+      setSyncState('error');
       throw e;
     } finally {
       inFlight = null;
@@ -459,6 +498,20 @@ export async function scheduleSync(immediate = false): Promise<void> {
   dirty = true;
   if (immediate) return flushToDrive();
   markDirty();
+}
+
+/** Serialize the current in-memory database. Callers typically trigger a
+ *  download of the bytes as a .fitnotes file. */
+export function exportBytes(): Uint8Array {
+  if (!db) throw new Error('Database not loaded.');
+  return serialize(db);
+}
+
+/** Force a flush right now (e.g. from a "Sincronizar" button in Settings).
+ *  Resolves when the upload completes. */
+export async function flushNow(): Promise<void> {
+  if (!dirty) return;
+  return flushToDrive();
 }
 
 if (typeof window !== 'undefined') {

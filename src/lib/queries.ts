@@ -473,6 +473,116 @@ export function getBodyWeight(): BodyWeight[] {
   );
 }
 
+// ─── Copy / duplicate helpers ─────────────────────────────────────────
+
+/** Most recent date (strictly before `beforeDate`) with at least one set. */
+export function getLastTrainingDateBefore(beforeDate: string): string | null {
+  const db = getDb();
+  const v = db.selectValue(
+    'SELECT MAX(date) FROM training_log WHERE date < ?',
+    [beforeDate],
+  );
+  return v ? String(v) : null;
+}
+
+/** Copy every set from `fromDate` into `toDate`. Returns the number of
+ *  rows created. Used by the "Repetir último entreno" button — keeps the
+ *  exercise, weight, reps, distance and duration so the user just has to
+ *  tweak from there. `is_personal_record` is intentionally reset since the
+ *  new rows haven't re-earned a PR. */
+export function copySetsFromDate(fromDate: string, toDate: string): number {
+  const db = getDb();
+  const src = rows<any>(
+    `SELECT exercise_id, metric_weight, reps, unit, distance, duration_seconds
+     FROM training_log WHERE date = ? ORDER BY _id ASC`,
+    [fromDate],
+  );
+  for (const r of src) {
+    db.exec({
+      sql: `INSERT INTO training_log (exercise_id, date, metric_weight, reps, unit, distance, duration_seconds)
+            VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      bind: [r.exercise_id, toDate, r.metric_weight, r.reps, r.unit ?? 0, r.distance ?? 0, r.duration_seconds ?? 0],
+    });
+  }
+  if (src.length) markDirty();
+  return src.length;
+}
+
+/** Duplicate a single set on the same date. Returns the new row id. */
+export function duplicateSet(setId: number): number {
+  const db = getDb();
+  const r = rows<any>(
+    `SELECT exercise_id, date, metric_weight, reps, unit, distance, duration_seconds
+     FROM training_log WHERE _id = ?`,
+    [setId],
+  )[0];
+  if (!r) throw new Error('Set no encontrado');
+  db.exec({
+    sql: `INSERT INTO training_log (exercise_id, date, metric_weight, reps, unit, distance, duration_seconds)
+          VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    bind: [r.exercise_id, r.date, r.metric_weight, r.reps, r.unit ?? 0, r.distance ?? 0, r.duration_seconds ?? 0],
+  });
+  const id = Number(db.selectValue('SELECT last_insert_rowid()'));
+  markDirty();
+  return id;
+}
+
+/** Number of consecutive weeks (Monday-based) with at least one training
+ *  day, counting backwards from this week. A week with zero training days
+ *  breaks the streak. The current week counts even if empty, as long as
+ *  the previous weeks were trained — encourages "keep the streak alive". */
+export function getWeeklyStreak(): number {
+  const rowsWk = rows<{ date: string }>(
+    'SELECT DISTINCT date FROM training_log ORDER BY date DESC',
+  );
+  if (rowsWk.length === 0) return 0;
+  const weekKeys = new Set<string>();
+  for (const r of rowsWk) weekKeys.add(mondayKey(r.date));
+
+  let streak = 0;
+  let cursor = mondayKey(todayISO());
+  // Allow the current week to count even without a session yet.
+  const firstWeekKey = cursor;
+  let allowEmptyThisWeek = !weekKeys.has(cursor);
+  while (true) {
+    const trained = weekKeys.has(cursor);
+    if (trained) {
+      streak++;
+      cursor = shiftMondayKey(cursor, -7);
+      allowEmptyThisWeek = false;
+      continue;
+    }
+    if (allowEmptyThisWeek && cursor === firstWeekKey) {
+      // Skip the current week without resetting; fall through to the prior.
+      cursor = shiftMondayKey(cursor, -7);
+      allowEmptyThisWeek = false;
+      continue;
+    }
+    break;
+  }
+  return streak;
+}
+
+function mondayKey(isoDate: string): string {
+  // Return the Monday of the week containing `isoDate`, as YYYY-MM-DD.
+  const d = new Date(isoDate + 'T00:00:00');
+  const day = d.getDay(); // 0 Sun .. 6 Sat
+  const daysFromMonday = (day + 6) % 7; // Mon=0, Sun=6
+  d.setDate(d.getDate() - daysFromMonday);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${dd}`;
+}
+function shiftMondayKey(key: string, days: number): string {
+  const d = new Date(key + 'T00:00:00');
+  d.setDate(d.getDate() + days);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${dd}`;
+}
+
 // ─── Utilities ────────────────────────────────────────────────────────
 
 export function todayISO(): string {

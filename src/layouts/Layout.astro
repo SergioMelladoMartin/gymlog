@@ -2,6 +2,8 @@
 import '../styles/global.css';
 import { ClientRouter } from 'astro:transitions';
 import SideNav from '../components/SideNav';
+import SyncStatus from '../components/SyncStatus';
+import Onboarding from '../components/Onboarding';
 
 interface Props {
   title?: string;
@@ -65,11 +67,13 @@ const navTitle = {
           </a>
           <span class="truncate text-[15px] font-semibold tracking-tight">{navTitle}</span>
         </div>
+        {activeNav !== 'login' && <SyncStatus client:only="react" transition:persist="sync-status" />}
       </div>
     </header>
 
     <main class="mx-auto max-w-3xl px-4 py-6">
       <slot />
     </main>
+    {activeNav !== 'login' && <Onboarding client:only="react" />}
   </body>
 </html>

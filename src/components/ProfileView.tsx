@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { getCurrentUser, type UserProfile } from '../lib/auth';
 import { getDb } from '../lib/sqlite';
+import { getWeeklyStreak } from '../lib/queries';
 import { useDatabase } from '../hooks/useDatabase';
+import { useT } from '../hooks/useT';
 
 interface Stats {
   totalSets: number;
@@ -13,9 +15,11 @@ interface Stats {
 }
 
 export default function ProfileView() {
+  const { t, lang } = useT();
   const ready = useDatabase();
   const [user, setUser] = useState<UserProfile | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
+  const [streak, setStreak] = useState<number>(0);
 
   useEffect(() => { setUser(getCurrentUser()); }, []);
 
@@ -40,6 +44,7 @@ export default function ProfileView() {
       firstDay: row?.first_day ?? null,
       lastDay: row?.last_day ?? null,
     });
+    setStreak(getWeeklyStreak());
   }, [ready]);
 
   if (!ready) {
@@ -50,18 +55,19 @@ export default function ProfileView() {
     );
   }
 
-  const fmt = (n: number) => Math.round(n).toLocaleString('es-ES');
+  const locale = lang === 'en' ? 'en-US' : 'es-ES';
+  const fmt = (n: number) => Math.round(n).toLocaleString(locale);
   const prettyDate = (iso: string | null) =>
-    iso ? new Date(iso + 'T00:00:00').toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' }) : '—';
+    iso ? new Date(iso + 'T00:00:00').toLocaleDateString(locale, { day: 'numeric', month: 'long', year: 'numeric' }) : '—';
 
   return (
     <>
       <div className="mb-4">
         <a href="/" className="mb-2 inline-flex items-center gap-1 text-sm text-muted transition hover:text-fg">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
-          Volver
+          {t('action.back')}
         </a>
-        <h1 className="text-3xl font-semibold tracking-tight">Perfil</h1>
+        <h1 className="text-3xl font-semibold tracking-tight">{t('profile.title')}</h1>
       </div>
 
       <section className="card mb-5 flex items-center gap-4 p-5">
@@ -78,30 +84,40 @@ export default function ProfileView() {
           </span>
         )}
         <div className="min-w-0 flex-1">
-          <div className="truncate text-xl font-semibold tracking-tight">{user?.name ?? 'Usuario'}</div>
+          <div className="flex items-center gap-2">
+            <div className="truncate text-xl font-semibold tracking-tight">{user?.name ?? 'Usuario'}</div>
+            {streak > 0 && (
+              <span
+                title={t('profile.streak')}
+                className="inline-flex items-center gap-1 rounded-full border border-accent/40 bg-accent/15 px-2 py-0.5 text-[11px] font-semibold text-fg"
+              >
+                🔥 {t('profile.streakWeeks', { n: streak })}
+              </span>
+            )}
+          </div>
           <div className="truncate text-sm text-muted">{user?.email ?? ''}</div>
-          <div className="mt-1 text-[11px] text-muted">Conectado con Google</div>
+          <div className="mt-1 text-[11px] text-muted">{t('profile.connectedGoogle')}</div>
         </div>
       </section>
 
       {stats && stats.totalSets > 0 && (
         <section className="mb-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <Tile label="Días" value={String(stats.totalDays)} />
-          <Tile label="Sets" value={fmt(stats.totalSets)} />
-          <Tile label="Ejercicios" value={String(stats.totalExercises)} />
-          <Tile label="Volumen" value={`${Math.round(stats.totalVolume / 1000)}k`} unit="kg" />
+          <Tile label={t('profile.days')} value={String(stats.totalDays)} />
+          <Tile label={t('profile.sets')} value={fmt(stats.totalSets)} />
+          <Tile label={t('profile.exercises')} value={String(stats.totalExercises)} />
+          <Tile label={t('profile.volume')} value={`${Math.round(stats.totalVolume / 1000)}k`} unit="kg" />
         </section>
       )}
 
       {stats && stats.firstDay && (
         <section className="card mb-5 p-4">
-          <div className="section-title mb-2">Registro</div>
+          <div className="section-title mb-2">{t('profile.register')}</div>
           <div className="flex items-center justify-between text-sm">
-            <span className="text-muted">Primer entreno</span>
+            <span className="text-muted">{t('profile.firstWorkout')}</span>
             <span className="capitalize">{prettyDate(stats.firstDay)}</span>
           </div>
           <div className="mt-2 flex items-center justify-between text-sm">
-            <span className="text-muted">Último entreno</span>
+            <span className="text-muted">{t('profile.lastWorkout')}</span>
             <span className="capitalize">{prettyDate(stats.lastDay)}</span>
           </div>
         </section>
@@ -114,7 +130,7 @@ export default function ProfileView() {
             <circle cx="12" cy="12" r="3" />
             <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
           </svg>
-          Ajustes
+          {t('nav.settings')}
         </span>
         <svg className="text-muted" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
       </a>

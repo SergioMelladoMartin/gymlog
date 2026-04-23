@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { getCurrentUser, type UserProfile } from '../lib/auth';
+import { useT } from '../hooks/useT';
 
 type NavKey = 'today' | 'calendar' | 'diary' | 'stats' | 'exercises';
 
@@ -8,11 +9,11 @@ interface Props {
   active: NavKey;
 }
 
-interface Item { key: NavKey; href: string; label: string; icon: JSX.Element }
+interface Item { key: NavKey; href: string; labelKey: string; icon: JSX.Element }
 
 const ITEMS: Item[] = [
   {
-    key: 'today', href: '/', label: 'Hoy',
+    key: 'today', href: '/', labelKey: 'nav.today',
     icon: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="m6.5 6.5 11 11" /><path d="m21 21-1-1" /><path d="m3 3 1 1" />
@@ -21,7 +22,7 @@ const ITEMS: Item[] = [
     ),
   },
   {
-    key: 'calendar', href: '/calendar', label: 'Calendario',
+    key: 'calendar', href: '/calendar', labelKey: 'nav.calendar',
     icon: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <rect width="18" height="18" x="3" y="4" rx="2" />
@@ -30,7 +31,7 @@ const ITEMS: Item[] = [
     ),
   },
   {
-    key: 'diary', href: '/diary', label: 'Diario',
+    key: 'diary', href: '/diary', labelKey: 'nav.diary',
     icon: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" />
@@ -38,7 +39,7 @@ const ITEMS: Item[] = [
     ),
   },
   {
-    key: 'exercises', href: '/exercises', label: 'Ejercicios',
+    key: 'exercises', href: '/exercises', labelKey: 'nav.exercises',
     icon: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M6.5 6.5h11" /><path d="M6.5 17.5h11" />
@@ -48,7 +49,7 @@ const ITEMS: Item[] = [
     ),
   },
   {
-    key: 'stats', href: '/stats', label: 'Estadísticas',
+    key: 'stats', href: '/stats', labelKey: 'nav.stats',
     icon: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M3 3v18h18" /><path d="m7 14 4-4 4 4 5-5" />
@@ -58,6 +59,7 @@ const ITEMS: Item[] = [
 ];
 
 export default function SideNav({ active }: Props) {
+  const { t } = useT();
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -221,13 +223,13 @@ export default function SideNav({ active }: Props) {
                 href={item.href}
                 onClick={() => setOpen(false)}
                 aria-current={isActive ? 'page' : undefined}
-                title={isCollapsed ? item.label : undefined}
+                title={isCollapsed ? t(item.labelKey) : undefined}
                 className={`flex items-center rounded-lg text-sm font-medium transition ${
                   isCollapsed ? 'justify-center px-0 py-2.5' : 'gap-3 px-3 py-2.5'
                 } ${isActive ? 'bg-accent text-ink' : 'text-fg hover:bg-elevated'}`}
               >
                 <span className={isActive ? '' : 'text-muted'}>{item.icon}</span>
-                {!isCollapsed && item.label}
+                {!isCollapsed && t(item.labelKey)}
               </a>
             );
           })}
@@ -237,7 +239,7 @@ export default function SideNav({ active }: Props) {
           <a
             href="/settings"
             onClick={() => !isDesktop && setOpen(false)}
-            title={isCollapsed ? 'Ajustes' : undefined}
+            title={isCollapsed ? t('nav.settings') : undefined}
             className={`mb-1 flex w-full items-center rounded-lg text-sm text-fg transition hover:bg-elevated ${
               isCollapsed ? 'justify-center px-0 py-2' : 'gap-2 px-3 py-2'
             }`}
@@ -246,7 +248,7 @@ export default function SideNav({ active }: Props) {
               <circle cx="12" cy="12" r="3" />
               <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
             </svg>
-            {!isCollapsed && 'Ajustes'}
+            {!isCollapsed && t('nav.settings')}
           </a>
 
           <a

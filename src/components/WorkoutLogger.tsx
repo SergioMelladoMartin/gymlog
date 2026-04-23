@@ -2,13 +2,21 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Category } from '../lib/types';
 import type { ExerciseExtra as Exercise, TrainingSetEx } from '../lib/queries';
 import {
+  copySetsFromDate,
   createExercise as qCreateExercise,
   createSet as qCreateSet,
   deleteSet as qDeleteSet,
+  duplicateSet as qDuplicateSet,
+  getLastTrainingDateBefore,
   getSetsForDate as qGetSets,
   setWorkoutComment as qSetComment,
   updateSet as qUpdateSet,
 } from '../lib/queries';
+import { useT } from '../hooks/useT';
+
+function vibrate(pattern: number | number[]) {
+  try { if ('vibrate' in navigator) navigator.vibrate(pattern); } catch {}
+}
 
 // Runtime set shape used by the logger — extended query type with PR flags
 // and the legacy `is_personal_record` for backwards compat with the UI.
@@ -33,6 +41,7 @@ interface DraftSet {
 }
 
 export default function WorkoutLogger({ date, exercises: initialExercises, categories, initialSets, initialComment }: Props) {
+  const { t } = useT();
   const [exercises, setExercises] = useState<Exercise[]>(initialExercises);
   const [sets, setSets] = useState<TrainingSet[]>(initialSets);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -98,10 +107,13 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
   }
 
   function addSet(exerciseId: number, weight: number, reps: number) {
-    qCreateSet({ exercise_id: exerciseId, date, weight_kg: weight, reps });
+    const result = qCreateSet({ exercise_id: exerciseId, date, weight_kg: weight, reps });
     refreshSets();
     setLastSetAt((prev) => ({ ...prev, [exerciseId]: Date.now() }));
     setPendingExerciseIds((prev) => prev.filter((id) => id !== exerciseId));
+    // Light tap on save, stronger triple-buzz if we just set a PR.
+    if (result?.pr_weight || result?.pr_1rm || result?.pr_reps) vibrate([20, 40, 20, 40, 40]);
+    else vibrate(10);
   }
 
   function addCardioSet(exerciseId: number, durationSec: number, distanceM: number) {
@@ -116,6 +128,37 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
     refreshSets();
     setLastSetAt((prev) => ({ ...prev, [exerciseId]: Date.now() }));
     setPendingExerciseIds((prev) => prev.filter((id) => id !== exerciseId));
+    vibrate(10);
+  }
+
+  function duplicateSet(setId: number) {
+    qDuplicateSet(setId);
+    refreshSets();
+    setEditingSetId(null);
+    vibrate(10);
+  }
+
+  // "Repetir último entreno": only available when today is empty + a prior
+  // training day exists. Copies the full exercise/weight/reps/cardio payload.
+  const [copying, setCopying] = useState(false);
+  const lastTrainingDate = useMemo(
+    () => (sets.length === 0 ? getLastTrainingDateBefore(date) : null),
+    // getLastTrainingDateBefore is pure against the DB; re-run when `date`
+    // changes or whenever the set list refreshes.
+    [date, sets.length],
+  );
+  function copyLastWorkout() {
+    if (!lastTrainingDate || copying) return;
+    setCopying(true);
+    try {
+      const n = copySetsFromDate(lastTrainingDate, date);
+      if (n > 0) {
+        refreshSets();
+        vibrate([10, 40, 10]);
+      }
+    } finally {
+      setCopying(false);
+    }
   }
 
   function deleteSet(id: number) {
@@ -201,11 +244,11 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
               <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M7.5 2h9l1.5 3h3.5l-2.5 5a6 6 0 0 1-4.4 3.85L14 18h2v2H8v-2h2l-.6-4.15A6 6 0 0 1 5 10L2.5 5H6zm0 2-.47.94L8.4 8.67A4 4 0 0 0 12 11a4 4 0 0 0 3.6-2.33L17.47 4.94 17 4z"/></svg>
             </span>
             <div>
-              <div className="text-sm font-semibold text-fg">¡Nueva marca personal!</div>
+              <div className="text-sm font-semibold text-fg">{t('workout.newPr')}</div>
               <div className="mt-0.5 flex flex-wrap gap-1.5 text-[11px]">
-                {prTotals.w > 0 && <PrTag label={`${prTotals.w}× peso`} />}
+                {prTotals.w > 0 && <PrTag label={`${prTotals.w}× ${t('field.weight').replace(' · kg', '').toLowerCase()}`} />}
                 {prTotals.rm > 0 && <PrTag label={`${prTotals.rm}× 1RM`} />}
-                {prTotals.r > 0 && <PrTag label={`${prTotals.r}× reps`} />}
+                {prTotals.r > 0 && <PrTag label={`${prTotals.r}× ${t('field.reps').toLowerCase()}`} />}
               </div>
             </div>
           </div>
@@ -220,19 +263,31 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
         className="flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-border bg-card/60 px-4 py-3.5 text-sm font-semibold text-fg transition hover:border-strong hover:bg-elevated"
       >
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M12 5v14" /><path d="M5 12h14" /></svg>
-        Añadir ejercicio
+        {t('workout.addExercise')}
       </button>
 
       {allCards.length === 0 ? (
-        <div className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border bg-card/40 py-10 text-center">
-          <div className="grid h-12 w-12 place-items-center rounded-full bg-elevated text-muted">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M6.5 6.5h11" /><path d="M6.5 17.5h11" />
-              <path d="M3 10v4" /><path d="M21 10v4" />
-              <path d="M6.5 6.5v11" /><path d="M17.5 6.5v11" />
-            </svg>
+        <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-border bg-card/40 px-4 py-10 text-center">
+          <div className="grid h-14 w-14 place-items-center rounded-full bg-accent/15 text-3xl">💪</div>
+          <div>
+            <div className="text-base font-semibold tracking-tight">{t('workout.noExercisesTitle')}</div>
+            <div className="mt-1 text-sm text-muted">{t('workout.noExercisesBody')}</div>
           </div>
-          <div className="text-sm text-muted">Aún no hay ejercicios en este día.</div>
+          {lastTrainingDate && (
+            <button
+              type="button"
+              onClick={copyLastWorkout}
+              disabled={copying}
+              className="mt-1 inline-flex items-center gap-2 rounded-full border border-border bg-card px-4 py-2 text-xs font-medium text-fg transition hover:border-strong hover:bg-elevated disabled:opacity-40"
+              title={t('workout.copyYesterdayHint', { date: relativeDate(lastTrainingDate) })}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M17 2l4 4-4 4" /><path d="M3 11v-1a4 4 0 0 1 4-4h14" />
+                <path d="M7 22l-4-4 4-4" /><path d="M21 13v1a4 4 0 0 1-4 4H3" />
+              </svg>
+              {copying ? t('workout.copying') : t('workout.copyYesterday')}
+            </button>
+          )}
         </div>
       ) : (
         <div className="flex flex-col gap-3">
@@ -259,18 +314,18 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
                     <RestTimer startedAt={lastSetAt[exerciseId]} />
                   </div>
                   <span className="hidden shrink-0 text-xs tabular-nums text-muted sm:inline">
-                    {cardio
-                      ? `${exSets.length} ${exSets.length === 1 ? 'serie' : 'series'}${totalDuration ? ` · ${formatDuration(totalDuration)}` : ''}${totalDistance > 0 ? ` · ${formatDistance(totalDistance)}` : ''}`
-                      : exSets.length
-                        ? `${exSets.length} sets · ${Math.round(totalVol).toLocaleString('es-ES')} kg`
-                        : 'Sin series aún'}
+                    {exSets.length === 0
+                      ? t('workout.noSetsYet')
+                      : `${exSets.length} ${exSets.length === 1 ? t('workout.serie') : t('workout.series')}${cardio
+                          ? `${totalDuration ? ` · ${formatDuration(totalDuration)}` : ''}${totalDistance > 0 ? ` · ${formatDistance(totalDistance)}` : ''}`
+                          : ` · ${Math.round(totalVol).toLocaleString('es-ES')} kg`}`}
                   </span>
                 </header>
 
                 {exSets.length > 0 && (
                   <>
                     <div className="flex items-center justify-between border-t border-border/60 bg-elevated/30 px-4 py-1.5 text-[11px] tabular-nums text-muted sm:hidden">
-                      <span>{exSets.length} {cardio ? (exSets.length === 1 ? 'serie' : 'series') : 'sets'}</span>
+                      <span>{exSets.length} {exSets.length === 1 ? t('workout.serie') : t('workout.series')}</span>
                       <span>
                         {cardio
                           ? `${formatDuration(totalDuration)}${totalDistance > 0 ? ` · ${formatDistance(totalDistance)}` : ''}`
@@ -292,7 +347,10 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
                             await updateSet(s.id, patch);
                             setEditingSetId(null);
                           }}
-                          onDelete={() => deleteSet(s.id)}
+                          onDelete={() => {
+                            if (window.confirm(t('workout.confirmDeleteSet'))) deleteSet(s.id);
+                          }}
+                          onDuplicate={() => duplicateSet(s.id)}
                         />
                       ))}
                     </ol>
@@ -304,8 +362,8 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
                     <button
                       type="button"
                       onClick={() => setOpenAdderId(null)}
-                      aria-label="Cerrar"
-                      title="Cerrar"
+                      aria-label={t('action.close')}
+                      title={t('action.close')}
                       className="absolute right-2 top-2 grid h-6 w-6 place-items-center rounded-md text-muted transition hover:bg-card hover:text-fg"
                     >
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
@@ -323,7 +381,7 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
                     className="flex w-full items-center justify-center gap-1.5 border-t border-dashed border-border/80 bg-transparent px-4 py-2 text-[11px] font-medium text-muted transition hover:bg-elevated/40 hover:text-fg"
                   >
                     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M12 5v14" /><path d="M5 12h14" /></svg>
-                    Añadir {cardio ? 'serie' : 'set'}
+                    {t('workout.addSet')}
                   </button>
                 )}
               </article>
@@ -334,14 +392,14 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
 
       {/* Notes */}
       <section className="card p-4">
-        <div className="section-title mb-2">Notas del día</div>
+        <div className="section-title mb-2">{t('workout.notes')}</div>
         <textarea
           value={comment}
           onChange={(e) => {
             setComment(e.target.value);
             setCommentDirty(true);
           }}
-          placeholder="Sensaciones, dolores, nuevos ejercicios…"
+          placeholder={t('workout.notesPlaceholder')}
           rows={3}
           className="w-full resize-none rounded-lg border border-border bg-elevated px-3 py-2 text-sm outline-none transition focus:border-accent/60"
         />
@@ -369,6 +427,7 @@ function QuickAdd({
   onAdd: (id: number, w: number, r: number) => void;
   lastSets: TrainingSet[];
 }) {
+  const { t: tLocal } = useT();
   const [draft, setDraft] = useState<DraftSet>({ weight: '', reps: '' });
   const [justAdded, setJustAdded] = useState(false);
   const weightRef = useRef<HTMLInputElement>(null);
@@ -417,25 +476,25 @@ function QuickAdd({
   return (
     <form onSubmit={submit} className="flex items-end gap-2">
       <StepperField
-        label="Peso · kg"
+        label={tLocal('field.weight')}
         value={draft.weight}
         onChange={(v) => setDraft((d) => ({ ...d, weight: v }))}
         onDecrement={() => bumpWeight(-2.5)}
         onIncrement={() => bumpWeight(+2.5)}
-        decrementLabel="Restar 2.5 kg"
-        incrementLabel="Sumar 2.5 kg"
+        decrementLabel="-2.5 kg"
+        incrementLabel="+2.5 kg"
         inputRef={weightRef}
         focusMarker
         decimal
       />
       <StepperField
-        label="Reps"
+        label={tLocal('field.reps')}
         value={draft.reps}
         onChange={(v) => setDraft((d) => ({ ...d, reps: v }))}
         onDecrement={() => bumpReps(-1)}
         onIncrement={() => bumpReps(+1)}
-        decrementLabel="Restar 1 rep"
-        incrementLabel="Sumar 1 rep"
+        decrementLabel="-1"
+        incrementLabel="+1"
       />
       <button
         type="submit"
@@ -734,6 +793,7 @@ function SetRow({
   onCancelEdit,
   onSave,
   onDelete,
+  onDuplicate,
 }: {
   set: TrainingSet;
   index: number;
@@ -743,6 +803,7 @@ function SetRow({
   onCancelEdit: () => void;
   onSave: (patch: Partial<Pick<TrainingSet, 'weight_kg' | 'reps' | 'duration_seconds' | 'distance_m'>>) => void | Promise<void>;
   onDelete: () => void;
+  onDuplicate: () => void;
 }) {
   if (editing) {
     return (
@@ -753,6 +814,7 @@ function SetRow({
             initialDistance={set.distance_m}
             onCancel={onCancelEdit}
             onSave={(dur, dist) => onSave({ duration_seconds: dur, distance_m: dist })}
+            onDuplicate={onDuplicate}
           />
         ) : (
           <EditWeightForm
@@ -760,6 +822,7 @@ function SetRow({
             initialReps={set.reps}
             onCancel={onCancelEdit}
             onSave={(w, r) => onSave({ weight_kg: w, reps: r })}
+            onDuplicate={onDuplicate}
           />
         )}
       </li>
@@ -832,12 +895,15 @@ function EditWeightForm({
   initialReps,
   onCancel,
   onSave,
+  onDuplicate,
 }: {
   initialWeight: number;
   initialReps: number;
   onCancel: () => void;
   onSave: (weight: number, reps: number) => void | Promise<void>;
+  onDuplicate?: () => void;
 }) {
+  const { t } = useT();
   const [w, setW] = useState(String(initialWeight));
   const [r, setR] = useState(String(initialReps));
   const [saving, setSaving] = useState(false);
@@ -852,25 +918,40 @@ function EditWeightForm({
   }
 
   return (
-    <form onSubmit={save} className="flex items-end gap-2">
-      <label className="flex-1">
-        <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-muted">Peso · kg</div>
-        <input autoFocus type="text" inputMode="decimal" value={w} onChange={(e) => setW(e.target.value)}
-          className="w-full rounded-lg border border-border bg-bg px-3 py-2 text-base font-semibold tabular-nums outline-none focus:border-accent/60" />
-      </label>
-      <label className="flex-1">
-        <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-muted">Reps</div>
-        <input type="text" inputMode="numeric" value={r} onChange={(e) => setR(e.target.value)}
-          className="w-full rounded-lg border border-border bg-bg px-3 py-2 text-base font-semibold tabular-nums outline-none focus:border-accent/60" />
-      </label>
-      <button type="submit" disabled={saving}
-        className="grid h-10 w-10 place-items-center rounded-lg bg-accent text-ink transition hover:brightness-110 disabled:opacity-40" aria-label="Guardar">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
-      </button>
-      <button type="button" onClick={onCancel}
-        className="grid h-10 w-10 place-items-center rounded-lg border border-border bg-card text-muted transition hover:text-fg" aria-label="Cancelar">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
-      </button>
+    <form onSubmit={save} className="flex flex-col gap-2">
+      <div className="flex items-end gap-2">
+        <label className="flex-1">
+          <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-muted">{t('field.weight')}</div>
+          <input autoFocus type="text" inputMode="decimal" value={w} onChange={(e) => setW(e.target.value)}
+            className="w-full rounded-lg border border-border bg-bg px-3 py-2 text-base font-semibold tabular-nums outline-none focus:border-accent/60" />
+        </label>
+        <label className="flex-1">
+          <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-muted">{t('field.reps')}</div>
+          <input type="text" inputMode="numeric" value={r} onChange={(e) => setR(e.target.value)}
+            className="w-full rounded-lg border border-border bg-bg px-3 py-2 text-base font-semibold tabular-nums outline-none focus:border-accent/60" />
+        </label>
+        <button type="submit" disabled={saving}
+          className="grid h-10 w-10 place-items-center rounded-lg bg-accent text-ink transition hover:brightness-110 disabled:opacity-40" aria-label={t('action.save')}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+        </button>
+        <button type="button" onClick={onCancel}
+          className="grid h-10 w-10 place-items-center rounded-lg border border-border bg-card text-muted transition hover:text-fg" aria-label={t('action.cancel')}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
+        </button>
+      </div>
+      {onDuplicate && (
+        <button
+          type="button"
+          onClick={onDuplicate}
+          className="inline-flex items-center justify-center gap-1.5 self-start rounded-md border border-border bg-card px-2.5 py-1 text-[11px] font-medium text-muted transition hover:border-strong hover:text-fg"
+        >
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+          </svg>
+          {t('action.duplicate')}
+        </button>
+      )}
     </form>
   );
 }
@@ -880,12 +961,15 @@ function EditCardioForm({
   initialDistance,
   onCancel,
   onSave,
+  onDuplicate,
 }: {
   initialDuration: number;
   initialDistance: number;
   onCancel: () => void;
   onSave: (durationSec: number, distanceM: number) => void | Promise<void>;
+  onDuplicate?: () => void;
 }) {
+  const { t } = useT();
   const [d, setD] = useState(initialDuration ? formatDuration(initialDuration) : '');
   const [km, setKm] = useState(initialDistance ? (initialDistance / 1000).toString() : '');
   const [saving, setSaving] = useState(false);
@@ -901,25 +985,40 @@ function EditCardioForm({
   }
 
   return (
-    <form onSubmit={save} className="flex items-end gap-2">
-      <label className="flex-1">
-        <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-muted">Duración</div>
-        <input autoFocus type="text" inputMode="numeric" value={d} onChange={(e) => setD(e.target.value)}
-          className="w-full rounded-lg border border-border bg-bg px-3 py-2 text-base font-semibold tabular-nums outline-none focus:border-accent/60" />
-      </label>
-      <label className="flex-1">
-        <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-muted">km</div>
-        <input type="text" inputMode="decimal" value={km} onChange={(e) => setKm(e.target.value)}
-          className="w-full rounded-lg border border-border bg-bg px-3 py-2 text-base font-semibold tabular-nums outline-none focus:border-accent/60" />
-      </label>
-      <button type="submit" disabled={saving}
-        className="grid h-10 w-10 place-items-center rounded-lg bg-accent text-ink transition hover:brightness-110 disabled:opacity-40" aria-label="Guardar">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
-      </button>
-      <button type="button" onClick={onCancel}
-        className="grid h-10 w-10 place-items-center rounded-lg border border-border bg-card text-muted transition hover:text-fg" aria-label="Cancelar">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
-      </button>
+    <form onSubmit={save} className="flex flex-col gap-2">
+      <div className="flex items-end gap-2">
+        <label className="flex-1">
+          <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-muted">{t('field.duration')}</div>
+          <input autoFocus type="text" inputMode="numeric" value={d} onChange={(e) => setD(e.target.value)}
+            className="w-full rounded-lg border border-border bg-bg px-3 py-2 text-base font-semibold tabular-nums outline-none focus:border-accent/60" />
+        </label>
+        <label className="flex-1">
+          <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-muted">{t('field.km')}</div>
+          <input type="text" inputMode="decimal" value={km} onChange={(e) => setKm(e.target.value)}
+            className="w-full rounded-lg border border-border bg-bg px-3 py-2 text-base font-semibold tabular-nums outline-none focus:border-accent/60" />
+        </label>
+        <button type="submit" disabled={saving}
+          className="grid h-10 w-10 place-items-center rounded-lg bg-accent text-ink transition hover:brightness-110 disabled:opacity-40" aria-label={t('action.save')}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+        </button>
+        <button type="button" onClick={onCancel}
+          className="grid h-10 w-10 place-items-center rounded-lg border border-border bg-card text-muted transition hover:text-fg" aria-label={t('action.cancel')}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
+        </button>
+      </div>
+      {onDuplicate && (
+        <button
+          type="button"
+          onClick={onDuplicate}
+          className="inline-flex items-center justify-center gap-1.5 self-start rounded-md border border-border bg-card px-2.5 py-1 text-[11px] font-medium text-muted transition hover:border-strong hover:text-fg"
+        >
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+          </svg>
+          {t('action.duplicate')}
+        </button>
+      )}
     </form>
   );
 }
@@ -933,6 +1032,7 @@ function QuickAddCardio({
   onAdd: (id: number, durationSec: number, distanceM: number) => void;
   lastSets: TrainingSet[];
 }) {
+  const { t: tLocal } = useT();
   const [duration, setDuration] = useState('');
   const [distance, setDistance] = useState('');
   const [justAdded, setJustAdded] = useState(false);
@@ -965,7 +1065,7 @@ function QuickAddCardio({
   return (
     <form onSubmit={submit} className="flex items-end gap-2">
       <label className="flex-1">
-        <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-muted">Duración · mm:ss</div>
+        <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-muted">{tLocal('field.durationMMSS')}</div>
         <input
           ref={durationRef}
           type="text"
@@ -978,7 +1078,7 @@ function QuickAddCardio({
         />
       </label>
       <label className="flex-1">
-        <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-muted">Distancia · km (opcional)</div>
+        <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-muted">{tLocal('field.distanceKm')}</div>
         <input
           type="text"
           inputMode="decimal"
