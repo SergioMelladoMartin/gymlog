@@ -73,6 +73,76 @@ function openFromBytes(bytes: Uint8Array): Database {
   return db;
 }
 
+/** Brand-new FitNotes-compatible database with sensible default categories. */
+function createEmptyDatabase(): Database {
+  const s = sqlite3!;
+  const db = new s.oo1.DB();
+  db.exec(`
+    CREATE TABLE Category (
+      _id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      colour INTEGER NOT NULL DEFAULT 0,
+      sort_order INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE exercise (
+      _id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      category_id INTEGER NOT NULL,
+      exercise_type_id INTEGER NOT NULL DEFAULT 0,
+      notes TEXT,
+      weight_increment INTEGER,
+      default_graph_id INTEGER,
+      default_rest_time INTEGER,
+      weight_unit_id INTEGER NOT NULL DEFAULT 0,
+      is_favourite INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE training_log (
+      _id INTEGER PRIMARY KEY AUTOINCREMENT,
+      exercise_id INTEGER NOT NULL,
+      date DATE NOT NULL,
+      metric_weight REAL NOT NULL,
+      reps INTEGER NOT NULL,
+      unit INTEGER NOT NULL DEFAULT 0,
+      routine_section_exercise_set_id INTEGER NOT NULL DEFAULT 0,
+      timer_auto_start INTEGER NOT NULL DEFAULT 0,
+      is_personal_record INTEGER NOT NULL DEFAULT 0,
+      is_personal_record_first INTEGER NOT NULL DEFAULT 0,
+      is_complete INTEGER NOT NULL DEFAULT 0,
+      is_pending_update INTEGER NOT NULL DEFAULT 0,
+      distance REAL NOT NULL DEFAULT 0,
+      duration_seconds INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE WorkoutComment (
+      _id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      comment TEXT NOT NULL
+    );
+    CREATE TABLE BodyWeight (
+      _id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      body_weight_metric REAL NOT NULL,
+      body_fat REAL NOT NULL DEFAULT 0,
+      comments TEXT
+    );
+  `);
+  // Default categories with FitNotes-style signed 32-bit ARGB colours.
+  const cats: [string, number, number][] = [
+    ['Pecho',     -11226442, 1],
+    ['Tríceps',   -13330213, 2],
+    ['Hombro',     -4179669, 3],
+    ['Cardio',     -4342339, 4],
+    ['Pierna',   -13877680, 5],
+    ['Espalda',  -13710223, 6],
+    ['Bíceps',    -6596170, 7],
+    ['Core',     -10453621, 8],
+    ['Antebrazo', -15294331, 9],
+  ];
+  for (const [name, colour, sort] of cats) {
+    db.exec({ sql: 'INSERT INTO Category (name, colour, sort_order) VALUES (?, ?, ?)', bind: [name, colour, sort] });
+  }
+  return db;
+}
+
 function serialize(db: Database): Uint8Array {
   const s = sqlite3!;
   const bytes = s.capi.sqlite3_js_db_export(db.pointer!);
@@ -137,12 +207,17 @@ export async function loadDatabase(options: { seedUrl?: string } = {}): Promise<
     }
 
     if (!bytes) {
-      setStatus('empty');
+      // No local copy, no Drive backup, no seed → start fresh with an empty
+      // FitNotes-compatible schema. Push it to Drive immediately so future
+      // devices find the same file.
+      db = createEmptyDatabase();
+      db.exec('PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;');
+      setStatus('ready');
+      scheduleSync(true).catch(() => {});
       return;
     }
 
     db = openFromBytes(bytes);
-    // Prefer WAL-like durability semantics for performance on mutations.
     db.exec('PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;');
     setStatus('ready');
   } catch (e) {
