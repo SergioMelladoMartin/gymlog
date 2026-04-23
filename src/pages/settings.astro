@@ -1,0 +1,7 @@
+---
+import Layout from '../layouts/Layout.astro';
+import SettingsView from '../components/SettingsView';
+---
+<Layout title="Ajustes · gymlog" activeNav="today">
+  <SettingsView client:only="react" />
+</Layout>

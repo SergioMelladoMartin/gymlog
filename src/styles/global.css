@@ -105,6 +105,10 @@
      sidebar doesn't cover it. */
   html.has-sidenav body {
     padding-left: 260px;
+    transition: padding-left 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  html.has-sidenav.sidenav-collapsed body {
+    padding-left: 72px;
   }
 
   body {

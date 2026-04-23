@@ -25,5 +25,15 @@ export function useDatabase(): boolean {
     }
   }, [status]);
 
+  // If another device pushes an update to Drive while this tab is open, the
+  // in-memory db gets hot-swapped. Reload so every view re-runs its queries
+  // against the fresh data.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onSwap = () => window.location.reload();
+    window.addEventListener('gymlog:db-swapped', onSwap);
+    return () => window.removeEventListener('gymlog:db-swapped', onSwap);
+  }, []);
+
   return status === 'ready';
 }

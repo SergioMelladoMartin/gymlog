@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { getCurrentUser, signOut, type UserProfile } from '../lib/auth';
-import { getDb, resetLocal } from '../lib/sqlite';
+import { getCurrentUser, type UserProfile } from '../lib/auth';
+import { getDb } from '../lib/sqlite';
 import { useDatabase } from '../hooks/useDatabase';
 
 interface Stats {
@@ -41,12 +41,6 @@ export default function ProfileView() {
       lastDay: row?.last_day ?? null,
     });
   }, [ready]);
-
-  async function logout() {
-    await signOut();
-    await resetLocal();
-    window.location.replace('/login');
-  }
 
   if (!ready) {
     return (
@@ -113,27 +107,17 @@ export default function ProfileView() {
         </section>
       )}
 
-      <section className="card mb-5 p-4">
-        <div className="section-title mb-3">Almacenamiento</div>
-        <p className="text-sm text-muted">
-          Tus datos se guardan en un único archivo <code className="rounded bg-elevated px-1.5 py-0.5">gymlog.fitnotes</code>
-          {' '}dentro de la carpeta oculta <b>appdata</b> de tu Google Drive. Compatible con la app FitNotes del móvil:
-          puedes abrirlo ahí y los cambios vuelven a sincronizarse.
-        </p>
-      </section>
-
-      <button
-        type="button"
-        onClick={logout}
-        className="flex w-full items-center justify-center gap-2 rounded-xl border border-danger/40 bg-danger/10 px-4 py-3 text-sm font-medium text-danger transition hover:bg-danger/20"
-      >
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-          <polyline points="16 17 21 12 16 7" />
-          <line x1="21" x2="9" y1="12" y2="12" />
-        </svg>
-        Cerrar sesión
-      </button>
+      <a href="/settings"
+        className="flex items-center justify-between rounded-xl border border-border bg-card px-4 py-3 text-sm font-medium transition hover:border-strong hover:bg-elevated">
+        <span className="flex items-center gap-2">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+          </svg>
+          Ajustes
+        </span>
+        <svg className="text-muted" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
+      </a>
     </>
   );
 }

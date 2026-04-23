@@ -17,6 +17,22 @@ import { pullBlobFromDrive, pushBlobToDrive, getRemoteMeta } from './drive';
 import { isSignedIn } from './auth';
 
 const OPFS_NAME = '/gymlog.fitnotes';
+const LS_REMOTE_META = 'gymlog-drive-meta';
+
+type RemoteMeta = { modifiedTime: string; size: number };
+
+function readStoredMeta(): RemoteMeta | null {
+  try {
+    const raw = localStorage.getItem(LS_REMOTE_META);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+function writeStoredMeta(meta: RemoteMeta | null) {
+  try {
+    if (meta) localStorage.setItem(LS_REMOTE_META, JSON.stringify(meta));
+    else localStorage.removeItem(LS_REMOTE_META);
+  } catch {}
+}
 
 type DbStatus = 'idle' | 'loading' | 'ready' | 'error' | 'empty';
 
@@ -309,12 +325,22 @@ export async function loadDatabase(options: { seedUrl?: string } = {}): Promise<
     // 1. Prefer a copy already in OPFS (fastest startup).
     let bytes = await opfsRead();
 
-    // 2. Otherwise, pull from Drive if the user is signed in.
-    if (!bytes && isSignedIn()) {
-      const remote = await pullBlobFromDrive().catch(() => null);
-      if (remote) {
-        bytes = new Uint8Array(remote);
-        await opfsWrite(bytes);
+    // 2. If signed in, check Drive. Prefer the remote copy when it is newer
+    //    than what we have cached locally — otherwise changes made on another
+    //    device (e.g. the phone) would never show up until OPFS is wiped.
+    if (isSignedIn()) {
+      const meta = await getRemoteMeta().catch(() => null);
+      if (meta) {
+        const stored = readStoredMeta();
+        const isNewer = !stored || stored.modifiedTime !== meta.modifiedTime || stored.size !== meta.size;
+        if (!bytes || isNewer) {
+          const remote = await pullBlobFromDrive().catch(() => null);
+          if (remote) {
+            bytes = new Uint8Array(remote);
+            await opfsWrite(bytes);
+            writeStoredMeta(meta);
+          }
+        }
       }
     }
 
@@ -386,6 +412,9 @@ async function flushToDrive(): Promise<void> {
       const bytes = serialize(db!);
       await opfsWrite(bytes);
       await pushBlobToDrive(bytes);
+      // Record the new remote state so future pull-checks know this is "ours".
+      const meta = await getRemoteMeta().catch(() => null);
+      if (meta) writeStoredMeta(meta);
     } catch (e) {
       dirty = true;
       throw e;
@@ -394,6 +423,36 @@ async function flushToDrive(): Promise<void> {
     }
   })();
   return inFlight;
+}
+
+/**
+ * If the remote copy on Drive is newer than what we have locally, pull it in
+ * and hot-swap the in-memory database. Returns true if a swap happened.
+ * Safe to call opportunistically (on tab focus, etc). Skips if there are
+ * unpushed local edits — those get flushed first by the caller.
+ */
+async function pullRemoteIfNewer(): Promise<boolean> {
+  if (!db || !isSignedIn()) return false;
+  if (dirty || inFlight) return false;
+  const meta = await getRemoteMeta().catch(() => null);
+  if (!meta) return false;
+  const stored = readStoredMeta();
+  if (stored && stored.modifiedTime === meta.modifiedTime && stored.size === meta.size) return false;
+  const buf = await pullBlobFromDrive().catch(() => null);
+  if (!buf) return false;
+  const bytes = new Uint8Array(buf);
+  await opfsWrite(bytes);
+  db.close();
+  db = openFromBytes(bytes);
+  db.exec('PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;');
+  writeStoredMeta(meta);
+  window.dispatchEvent(new CustomEvent('gymlog:db-swapped'));
+  return true;
+}
+
+export async function checkForRemoteUpdates(): Promise<boolean> {
+  if (dirty) { try { await flushToDrive(); } catch {} }
+  return pullRemoteIfNewer();
 }
 
 export async function scheduleSync(immediate = false): Promise<void> {
@@ -406,8 +465,21 @@ if (typeof window !== 'undefined') {
   const flushNow = () => { if (dirty) flushToDrive().catch(() => {}); };
   window.addEventListener('pagehide', flushNow);
   window.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') flushNow();
+    if (document.visibilityState === 'hidden') {
+      flushNow();
+    } else if (document.visibilityState === 'visible') {
+      // Someone else (likely the phone) may have pushed updates while this
+      // tab was idle. Pull them in.
+      checkForRemoteUpdates().catch(() => {});
+    }
   });
+  // Also poll every 2 minutes while the tab is foregrounded to catch updates
+  // from other devices in near-real-time.
+  setInterval(() => {
+    if (document.visibilityState === 'visible') {
+      checkForRemoteUpdates().catch(() => {});
+    }
+  }, 120_000);
 }
 
 // ── teardown on sign-out ──────────────────────────────────────────────
