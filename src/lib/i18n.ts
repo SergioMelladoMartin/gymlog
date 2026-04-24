@@ -81,6 +81,12 @@ const ES: Dict = {
   'settings.importing': 'Importando…',
   'settings.export': 'Exportar backup',
   'settings.exporting': 'Preparando…',
+  'settings.danger': 'Zona peligrosa',
+  'settings.wipeDrive': 'Borrar backup del Drive',
+  'settings.wipeDriveBlurb': 'Elimina para siempre el archivo gymlog.fitnotes de tu Google Drive y tu copia local. Esta acción NO se puede deshacer — si no tienes otro backup, perderás todos tus entrenos.',
+  'settings.wipeDriveConfirm': '¿Seguro que quieres borrar el backup? Esto es IRREVERSIBLE. Se perderán todos los entrenos guardados si no tienes otra copia.',
+  'settings.wiping': 'Borrando…',
+  'settings.wipeDone': 'Backup eliminado',
   'settings.signOut': 'Cerrar sesión',
 
   // Profile
@@ -189,6 +195,12 @@ const EN: Dict = {
   'settings.importing': 'Importing…',
   'settings.export': 'Export backup',
   'settings.exporting': 'Preparing…',
+  'settings.danger': 'Danger zone',
+  'settings.wipeDrive': 'Delete Drive backup',
+  'settings.wipeDriveBlurb': 'Permanently removes the gymlog.fitnotes file from your Google Drive and the local copy. This CANNOT be undone — if you don\'t have another backup you will lose every logged workout.',
+  'settings.wipeDriveConfirm': 'Are you sure you want to delete the backup? This is IRREVERSIBLE. Every logged workout will be lost if you have no other copy.',
+  'settings.wiping': 'Deleting…',
+  'settings.wipeDone': 'Backup deleted',
   'settings.signOut': 'Sign out',
 
   'profile.title': 'Profile',

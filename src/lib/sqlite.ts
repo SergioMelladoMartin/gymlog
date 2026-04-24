@@ -13,7 +13,7 @@ import sqlite3InitModule, {
   type Database,
   type Sqlite3Static,
 } from '@sqlite.org/sqlite-wasm';
-import { pullBlobFromDrive, pushBlobToDrive, getRemoteMeta } from './drive';
+import { deleteBlobFromDrive, pullBlobFromDrive, pushBlobToDrive, getRemoteMeta } from './drive';
 import { isSignedIn } from './auth';
 
 const OPFS_NAME = '/gymlog.fitnotes';
@@ -73,13 +73,16 @@ function openFromBytes(bytes: Uint8Array): Database {
   const db = new s.oo1.DB();
   const p = s.wasm.allocFromTypedArray(bytes);
   try {
+    // RESIZEABLE: let SQLite grow the buffer when we INSERT/ALTER.
+    // FREEONCLOSE: SQLite frees the buffer when the db is closed (otherwise
+    // we leak WASM memory every time we swap DBs, e.g. on each import).
     const rc = s.capi.sqlite3_deserialize(
       db.pointer!,
       'main',
       p,
       bytes.byteLength,
       bytes.byteLength,
-      s.capi.SQLITE_DESERIALIZE_RESIZEABLE,
+      s.capi.SQLITE_DESERIALIZE_RESIZEABLE | s.capi.SQLITE_DESERIALIZE_FREEONCLOSE,
     );
     if (rc !== 0) throw new Error(`sqlite3_deserialize failed: ${rc}`);
   } catch (e) {
@@ -93,53 +96,17 @@ function openFromBytes(bytes: Uint8Array): Database {
 function createEmptyDatabase(): Database {
   const s = sqlite3!;
   const db = new s.oo1.DB();
+  // Match the official FitNotes SQLite schema verbatim so an export from
+  // this app can be imported back into the Android FitNotes app and vice
+  // versa. The DDL here is taken directly from a real FitNotes backup.
   db.exec(`
-    CREATE TABLE Category (
-      _id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      colour INTEGER NOT NULL DEFAULT 0,
-      sort_order INTEGER NOT NULL DEFAULT 0
-    );
-    CREATE TABLE exercise (
-      _id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      category_id INTEGER NOT NULL,
-      exercise_type_id INTEGER NOT NULL DEFAULT 0,
-      notes TEXT,
-      weight_increment INTEGER,
-      default_graph_id INTEGER,
-      default_rest_time INTEGER,
-      weight_unit_id INTEGER NOT NULL DEFAULT 0,
-      is_favourite INTEGER NOT NULL DEFAULT 0
-    );
-    CREATE TABLE training_log (
-      _id INTEGER PRIMARY KEY AUTOINCREMENT,
-      exercise_id INTEGER NOT NULL,
-      date DATE NOT NULL,
-      metric_weight REAL NOT NULL,
-      reps INTEGER NOT NULL,
-      unit INTEGER NOT NULL DEFAULT 0,
-      routine_section_exercise_set_id INTEGER NOT NULL DEFAULT 0,
-      timer_auto_start INTEGER NOT NULL DEFAULT 0,
-      is_personal_record INTEGER NOT NULL DEFAULT 0,
-      is_personal_record_first INTEGER NOT NULL DEFAULT 0,
-      is_complete INTEGER NOT NULL DEFAULT 0,
-      is_pending_update INTEGER NOT NULL DEFAULT 0,
-      distance REAL NOT NULL DEFAULT 0,
-      duration_seconds INTEGER NOT NULL DEFAULT 0
-    );
-    CREATE TABLE WorkoutComment (
-      _id INTEGER PRIMARY KEY AUTOINCREMENT,
-      date TEXT NOT NULL,
-      comment TEXT NOT NULL
-    );
-    CREATE TABLE BodyWeight (
-      _id INTEGER PRIMARY KEY AUTOINCREMENT,
-      date TEXT NOT NULL,
-      body_weight_metric REAL NOT NULL,
-      body_fat REAL NOT NULL DEFAULT 0,
-      comments TEXT
-    );
+    CREATE TABLE android_metadata (locale TEXT);
+    CREATE TABLE Category(_id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, colour INTEGER NOT NULL DEFAULT 0, sort_order INTEGER NOT NULL DEFAULT 0);
+    CREATE TABLE exercise(_id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, category_id INTEGER NOT NULL, exercise_type_id INTEGER NOT NULL DEFAULT 0, notes TEXT, weight_increment INTEGER, default_graph_id INTEGER, default_rest_time INTEGER, weight_unit_id INTEGER NOT NULL DEFAULT 0, is_favourite INTEGER NOT NULL DEFAULT 0);
+    CREATE TABLE training_log (_id INTEGER PRIMARY KEY AUTOINCREMENT, exercise_id INTEGER NOT NULL, date DATE NOT NULL, metric_weight INTEGER NOT NULL, reps INTEGER NOT NULL, unit INTEGER NOT NULL DEFAULT 0, routine_section_exercise_set_id INTEGER NOT NULL DEFAULT 0, timer_auto_start INTEGER NOT NULL DEFAULT 0, is_personal_record INTEGER NOT NULL DEFAULT 0, is_personal_record_first INTEGER NOT NULL DEFAULT 0, is_complete INTEGER NOT NULL DEFAULT 0, is_pending_update INTEGER NOT NULL DEFAULT 0, distance INTEGER NOT NULL DEFAULT 0, duration_seconds INTEGER NOT NULL DEFAULT 0);
+    CREATE TABLE WorkoutComment (_id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT NOT NULL, comment TEXT NOT NULL);
+    CREATE TABLE BodyWeight (_id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT NOT NULL, body_weight_metric REAL NOT NULL, body_fat REAL NOT NULL DEFAULT 0, comments TEXT);
+    INSERT INTO android_metadata VALUES ('en_US');
   `);
   // Default categories (FitNotes-style signed 32-bit ARGB colours).
   const cats: [string, number, number][] = [
@@ -474,34 +441,71 @@ export async function loadDatabase(options: { seedUrl?: string } = {}): Promise<
  *  expect — and the migrated bytes are what we persist to OPFS/Drive. */
 export async function importBytes(bytes: Uint8Array): Promise<void> {
   await initSqlite();
+
+  // Fail fast with a readable message when the bytes are not a SQLite file
+  // at all. The sqlite3 magic string is the first 16 bytes.
+  const MAGIC = 'SQLite format 3\0';
+  const head = new TextDecoder().decode(bytes.slice(0, 16));
+  if (head !== MAGIC) {
+    throw new Error(
+      'El archivo no parece un backup de FitNotes: no es una base de datos SQLite.',
+    );
+  }
+
   let newDb: Database;
   try {
     newDb = openFromBytes(bytes);
   } catch (e: any) {
+    console.error('[import] sqlite3_deserialize failed', e);
     throw new Error(
-      'El archivo no parece un backup válido de FitNotes (' +
-        (e?.message ?? 'archivo corrupto o formato desconocido') +
-        ').',
+      'No se pudo abrir el archivo: ' + (e?.message ?? 'error desconocido al deserializar'),
     );
   }
+
+  // Quick shape check — the three tables the app needs. If none exist,
+  // this isn't a FitNotes DB at all (could be somebody else's SQLite file).
+  try {
+    const core = Number(newDb.selectValue(
+      `SELECT COUNT(*) FROM sqlite_master
+       WHERE type = 'table' AND name IN ('Category','exercise','training_log')`,
+    ) ?? 0);
+    if (core < 3) {
+      newDb.close();
+      throw new Error(
+        'El archivo no parece un backup de FitNotes: faltan las tablas Category/exercise/training_log.',
+      );
+    }
+  } catch (e: any) {
+    console.error('[import] shape check failed', e);
+    throw e instanceof Error ? e : new Error(String(e));
+  }
+
   try {
     newDb.exec('PRAGMA foreign_keys=OFF;'); // don't block ALTERs on existing FK rows
     migrateSchema(newDb);
     newDb.exec('PRAGMA foreign_keys=ON;');
   } catch (e: any) {
+    console.error('[import] migrateSchema failed', e);
     newDb.close();
     throw new Error(
-      'No se pudo preparar la base de datos importada: ' + (e?.message ?? 'error SQL'),
+      'Error SQL migrando el esquema: ' + (e?.message ?? 'sin detalle'),
     );
   }
+
   // Only swap once migration succeeded — if something above throws we keep
   // the previous DB intact.
   if (db) { db.close(); db = null; }
   db = newDb;
+
   // Persist the migrated bytes, not the originals, so future loads don't
   // have to re-migrate.
-  const migratedBytes = serialize(db);
-  await opfsWrite(migratedBytes);
+  try {
+    const migratedBytes = serialize(db);
+    await opfsWrite(migratedBytes);
+  } catch (e: any) {
+    console.error('[import] persist failed', e);
+    // Don't bail — the in-memory DB is already usable.
+  }
   setStatus('ready');
   scheduleSync(true);
 }
@@ -656,6 +660,19 @@ if (typeof window !== 'undefined') {
       checkForRemoteUpdates().catch(() => {});
     }
   }, 120_000);
+}
+
+/** Destructive — remove the gymlog.fitnotes backup from the user's Drive
+ *  AND the local OPFS copy, then close the in-memory DB. The caller is
+ *  expected to reload the page so a fresh empty DB is seeded. */
+export async function wipeAll(): Promise<void> {
+  try { await deleteBlobFromDrive(); } catch (e) { console.error('[wipe] drive', e); throw e; }
+  if (db) { db.close(); db = null; }
+  await opfsDelete();
+  writeStoredMeta(null);
+  setLastSyncAt(null);
+  setSyncState('idle');
+  setStatus('idle');
 }
 
 // ── teardown on sign-out ──────────────────────────────────────────────

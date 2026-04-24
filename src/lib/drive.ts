@@ -109,6 +109,24 @@ export async function pushBlobToDrive(bytes: Uint8Array): Promise<void> {
   else await createFile(bytes);
 }
 
+/** Permanently delete the gymlog.fitnotes file from the user's Drive
+ *  appdata folder. No-op (resolves false) if no file exists. Returns true
+ *  when something was actually removed. */
+export async function deleteBlobFromDrive(): Promise<boolean> {
+  const existing = await findFile();
+  if (!existing) return false;
+  const headers = await authHeaders();
+  const res = await fetch(`${DRIVE_API}/files/${existing.id}`, {
+    method: 'DELETE',
+    headers,
+  });
+  if (!res.ok && res.status !== 404) {
+    throw new Error(`drive delete failed: ${res.status} ${await res.text()}`);
+  }
+  cachedFileId = null;
+  return true;
+}
+
 export function clearCache() {
   cachedFileId = null;
 }

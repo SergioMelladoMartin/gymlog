@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { signOut } from '../lib/auth';
-import { exportBytes, importBytes, resetLocal, scheduleSync } from '../lib/sqlite';
+import { exportBytes, importBytes, resetLocal, scheduleSync, wipeAll } from '../lib/sqlite';
 import { useT } from '../hooks/useT';
 import { setLang, type Lang } from '../lib/i18n';
 
@@ -27,6 +27,7 @@ export default function SettingsView() {
   const [ua, setUa] = useState<{ ios: boolean; android: boolean }>({ ios: false, android: false });
   const [importing, setImporting] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [wiping, setWiping] = useState(false);
 
   useEffect(() => {
     setTheme((document.documentElement.getAttribute('data-theme') as 'light' | 'dark') || 'dark');
@@ -78,7 +79,11 @@ export default function SettingsView() {
       await scheduleSync(true);
       window.location.assign('/');
     } catch (e: any) {
-      alert(e?.message ?? 'Error al importar backup');
+      // Log the full error to the console so it's easy to ask the user to
+      // read us back what happened (fits on a phone too).
+      console.error('[import] failed', e);
+      const detail = e?.message ?? String(e) ?? 'Error al importar backup';
+      alert(detail);
       setImporting(false);
     }
   }
@@ -110,6 +115,20 @@ export default function SettingsView() {
     await signOut();
     await resetLocal();
     window.location.replace('/login');
+  }
+
+  async function wipeDrive() {
+    if (!window.confirm(t('settings.wipeDriveConfirm'))) return;
+    setWiping(true);
+    try {
+      await wipeAll();
+      // A fresh load seeds a brand-new empty DB. Push the user to the home
+      // so the flow feels clean.
+      window.location.replace('/');
+    } catch (e: any) {
+      alert(e?.message ?? 'Error');
+      setWiping(false);
+    }
   }
 
   function pickLang(next: Lang) {
@@ -267,6 +286,27 @@ export default function SettingsView() {
             <line x1="12" x2="12" y1="15" y2="3" />
           </svg>
           {exporting ? t('settings.exporting') : t('settings.export')}
+        </button>
+      </section>
+
+      {/* Danger zone */}
+      <section className="card mb-4 border-danger/30 bg-danger/5 p-4">
+        <div className="section-title mb-2 text-danger">{t('settings.danger')}</div>
+        <p className="mb-3 text-sm text-muted">{t('settings.wipeDriveBlurb')}</p>
+        <button
+          type="button"
+          onClick={wipeDrive}
+          disabled={wiping}
+          className="flex w-full items-center justify-center gap-2 rounded-lg border border-danger/40 bg-danger/10 px-4 py-2.5 text-sm font-medium text-danger transition hover:bg-danger/20 disabled:opacity-40"
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 6h18" />
+            <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+            <path d="M19 6 18 20a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+            <path d="M10 11v6" />
+            <path d="M14 11v6" />
+          </svg>
+          {wiping ? t('settings.wiping') : t('settings.wipeDrive')}
         </button>
       </section>
 
