@@ -286,6 +286,100 @@ function serialize(db: Database): Uint8Array {
   return bytes;
 }
 
+// ── Schema migration ──────────────────────────────────────────────────
+// FitNotes exports in the wild span several app versions. Older files may
+// be missing columns (notably `distance` and `duration_seconds`) or even
+// entire tables (`BodyWeight`, `WorkoutComment`). The app's queries assume
+// a superset of the schema, so the moment the user imports/loads a stale
+// file we top it up. This is safe-idempotent and runs in milliseconds.
+
+function tableExists(db: Database, name: string): boolean {
+  const n = Number(db.selectValue(
+    'SELECT COUNT(*) FROM sqlite_master WHERE type = ? AND name = ?',
+    ['table', name],
+  ) ?? 0);
+  return n > 0;
+}
+
+function columnNames(db: Database, table: string): Set<string> {
+  if (!tableExists(db, table)) return new Set();
+  const cols = db.exec({
+    sql: `PRAGMA table_info(${table})`,
+    rowMode: 'object',
+    returnValue: 'resultRows',
+  }) as Array<{ name: string }>;
+  return new Set(cols.map((c) => c.name));
+}
+
+function addColumnIfMissing(
+  db: Database,
+  table: string,
+  col: string,
+  ddl: string,
+  existing: Set<string>,
+) {
+  if (existing.has(col)) return;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${ddl}`);
+  existing.add(col);
+}
+
+function migrateSchema(db: Database): void {
+  // ---- training_log: cardio fields + flags ------------------------------
+  if (tableExists(db, 'training_log')) {
+    const cols = columnNames(db, 'training_log');
+    addColumnIfMissing(db, 'training_log', 'unit',                            'INTEGER NOT NULL DEFAULT 0', cols);
+    addColumnIfMissing(db, 'training_log', 'routine_section_exercise_set_id', 'INTEGER NOT NULL DEFAULT 0', cols);
+    addColumnIfMissing(db, 'training_log', 'timer_auto_start',                'INTEGER NOT NULL DEFAULT 0', cols);
+    addColumnIfMissing(db, 'training_log', 'is_personal_record',              'INTEGER NOT NULL DEFAULT 0', cols);
+    addColumnIfMissing(db, 'training_log', 'is_personal_record_first',        'INTEGER NOT NULL DEFAULT 0', cols);
+    addColumnIfMissing(db, 'training_log', 'is_complete',                     'INTEGER NOT NULL DEFAULT 0', cols);
+    addColumnIfMissing(db, 'training_log', 'is_pending_update',               'INTEGER NOT NULL DEFAULT 0', cols);
+    addColumnIfMissing(db, 'training_log', 'distance',                        'REAL NOT NULL DEFAULT 0',    cols);
+    addColumnIfMissing(db, 'training_log', 'duration_seconds',                'INTEGER NOT NULL DEFAULT 0', cols);
+  }
+
+  // ---- exercise: extended metadata -------------------------------------
+  if (tableExists(db, 'exercise')) {
+    const cols = columnNames(db, 'exercise');
+    addColumnIfMissing(db, 'exercise', 'exercise_type_id',  'INTEGER NOT NULL DEFAULT 0', cols);
+    addColumnIfMissing(db, 'exercise', 'notes',             'TEXT',                       cols);
+    addColumnIfMissing(db, 'exercise', 'weight_increment',  'INTEGER',                    cols);
+    addColumnIfMissing(db, 'exercise', 'default_graph_id',  'INTEGER',                    cols);
+    addColumnIfMissing(db, 'exercise', 'default_rest_time', 'INTEGER',                    cols);
+    addColumnIfMissing(db, 'exercise', 'weight_unit_id',    'INTEGER NOT NULL DEFAULT 0', cols);
+    addColumnIfMissing(db, 'exercise', 'is_favourite',      'INTEGER NOT NULL DEFAULT 0', cols);
+  }
+
+  // ---- Category: colour + sort_order -----------------------------------
+  if (tableExists(db, 'Category')) {
+    const cols = columnNames(db, 'Category');
+    addColumnIfMissing(db, 'Category', 'colour',     'INTEGER NOT NULL DEFAULT 0', cols);
+    addColumnIfMissing(db, 'Category', 'sort_order', 'INTEGER NOT NULL DEFAULT 0', cols);
+  }
+
+  // ---- Optional satellite tables ---------------------------------------
+  if (!tableExists(db, 'WorkoutComment')) {
+    db.exec(`CREATE TABLE WorkoutComment (
+      _id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      comment TEXT NOT NULL
+    )`);
+  }
+  if (!tableExists(db, 'BodyWeight')) {
+    db.exec(`CREATE TABLE BodyWeight (
+      _id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      body_weight_metric REAL NOT NULL,
+      body_fat REAL NOT NULL DEFAULT 0,
+      comments TEXT
+    )`);
+  } else {
+    const cols = columnNames(db, 'BodyWeight');
+    addColumnIfMissing(db, 'BodyWeight', 'body_fat', 'REAL NOT NULL DEFAULT 0', cols);
+    addColumnIfMissing(db, 'BodyWeight', 'comments', 'TEXT',                    cols);
+  }
+}
+
 // ── OPFS persistence ───────────────────────────────────────────────────
 async function opfsRead(): Promise<Uint8Array | null> {
   if (!('storage' in navigator) || !navigator.storage.getDirectory) return null;
@@ -366,6 +460,7 @@ export async function loadDatabase(options: { seedUrl?: string } = {}): Promise<
 
     db = openFromBytes(bytes);
     db.exec('PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;');
+    migrateSchema(db);
     setStatus('ready');
   } catch (e) {
     console.error('loadDatabase', e);
@@ -373,13 +468,40 @@ export async function loadDatabase(options: { seedUrl?: string } = {}): Promise<
   }
 }
 
-/** Replace the in-memory DB with these bytes (user uploaded a backup). */
+/** Replace the in-memory DB with these bytes (user uploaded a backup).
+ *  Runs `migrateSchema` so older FitNotes exports (missing cardio columns,
+ *  satellite tables, etc.) are brought up to the shape our queries
+ *  expect — and the migrated bytes are what we persist to OPFS/Drive. */
 export async function importBytes(bytes: Uint8Array): Promise<void> {
   await initSqlite();
+  let newDb: Database;
+  try {
+    newDb = openFromBytes(bytes);
+  } catch (e: any) {
+    throw new Error(
+      'El archivo no parece un backup válido de FitNotes (' +
+        (e?.message ?? 'archivo corrupto o formato desconocido') +
+        ').',
+    );
+  }
+  try {
+    newDb.exec('PRAGMA foreign_keys=OFF;'); // don't block ALTERs on existing FK rows
+    migrateSchema(newDb);
+    newDb.exec('PRAGMA foreign_keys=ON;');
+  } catch (e: any) {
+    newDb.close();
+    throw new Error(
+      'No se pudo preparar la base de datos importada: ' + (e?.message ?? 'error SQL'),
+    );
+  }
+  // Only swap once migration succeeded — if something above throws we keep
+  // the previous DB intact.
   if (db) { db.close(); db = null; }
-  db = openFromBytes(bytes);
-  db.exec('PRAGMA foreign_keys=ON;');
-  await opfsWrite(bytes);
+  db = newDb;
+  // Persist the migrated bytes, not the originals, so future loads don't
+  // have to re-migrate.
+  const migratedBytes = serialize(db);
+  await opfsWrite(migratedBytes);
   setStatus('ready');
   scheduleSync(true);
 }
@@ -484,6 +606,7 @@ async function pullRemoteIfNewer(): Promise<boolean> {
   db.close();
   db = openFromBytes(bytes);
   db.exec('PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;');
+  migrateSchema(db);
   writeStoredMeta(meta);
   window.dispatchEvent(new CustomEvent('gymlog:db-swapped'));
   return true;
