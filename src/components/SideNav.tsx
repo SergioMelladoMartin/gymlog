@@ -113,7 +113,19 @@ export default function SideNav({ active }: Props) {
     const update = () => setIsDesktop(mq.matches);
     update();
     mq.addEventListener('change', update);
-    return () => mq.removeEventListener('change', update);
+    // Astro view transitions re-render the page without unmounting persisted
+    // React islands. Re-check the media query after every swap so the
+    // sidebar can never end up in a stale "mobile-closed" state on desktop.
+    const onSwap = () => update();
+    document.addEventListener('astro:after-swap', onSwap);
+    document.addEventListener('astro:page-load', onSwap);
+    window.addEventListener('pageshow', onSwap);
+    return () => {
+      mq.removeEventListener('change', update);
+      document.removeEventListener('astro:after-swap', onSwap);
+      document.removeEventListener('astro:page-load', onSwap);
+      window.removeEventListener('pageshow', onSwap);
+    };
   }, []);
 
   // The body already carries `data-sidenav` (set declaratively by Astro
@@ -189,7 +201,7 @@ export default function SideNav({ active }: Props) {
     <>
       <div style={backdropStyle} onClick={() => setOpen(false)} aria-hidden="true" />
 
-      <aside style={drawerStyle} aria-hidden={!open}>
+      <aside data-sidebar style={drawerStyle} aria-hidden={!visible}>
         <div className={`flex shrink-0 items-center border-b border-border py-4 ${isCollapsed ? 'justify-center px-2' : 'justify-between px-4'}`}>
           <a
             href="/"

@@ -113,6 +113,15 @@
     body[data-sidenav].sidenav-collapsed {
       padding-left: 72px;
     }
+    /* Belt-and-braces: on desktop the sidebar must always be visible,
+       regardless of any React state that might briefly desync (e.g. during
+       Astro view transitions where the persisted island re-evaluates its
+       matchMedia after the next page is already visible). The CSS rule
+       beats the inline `transform: translateX(-100%)` React would set if
+       it ever miscomputed isDesktop. */
+    aside[data-sidebar] {
+      transform: translateX(0) !important;
+    }
   }
 
   body {
