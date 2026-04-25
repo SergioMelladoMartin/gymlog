@@ -199,8 +199,6 @@ export default function SideNav({ active }: Props) {
 
   const drawerOverlay = (
     <>
-      <div style={backdropStyle} onClick={() => setOpen(false)} aria-hidden="true" />
-
       <aside data-sidebar style={drawerStyle} aria-hidden={!visible}>
         <div className={`flex shrink-0 items-center border-b border-border py-4 ${isCollapsed ? 'justify-center px-2' : 'justify-between px-4'}`}>
           <a
@@ -346,24 +344,33 @@ export default function SideNav({ active }: Props) {
     </>
   );
 
+  // The hamburger button now lives in the Astro layout (server-rendered)
+  // and dispatches a `gymlog:open-sidenav` event when clicked. That way
+  // the sidebar drawer can be rendered at <body> level instead of inside
+  // the backdrop-filtered <header>, where `position: fixed` would be
+  // trapped by the header's containing block.
+  useEffect(() => {
+    const onOpen = () => setOpen(true);
+    window.addEventListener('gymlog:open-sidenav', onOpen as EventListener);
+    return () => window.removeEventListener('gymlog:open-sidenav', onOpen as EventListener);
+  }, []);
+
   return (
     <>
-      {/* Hamburger only on mobile — desktop has the sidebar pinned. */}
-      {!isDesktop && (
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          className="grid h-9 w-9 place-items-center rounded-lg border border-border bg-card text-fg transition hover:bg-elevated"
-          aria-label="Abrir menú"
-        >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="4" x2="20" y1="6" y2="6" />
-            <line x1="4" x2="20" y1="12" y2="12" />
-            <line x1="4" x2="20" y1="18" y2="18" />
-          </svg>
-        </button>
-      )}
-      {mounted ? createPortal(drawerOverlay, document.body) : null}
+      {drawerOverlay}
+      {mounted && open && !isDesktop ? createPortal(
+        <div
+          style={{
+            position: 'fixed', inset: 0,
+            background: 'rgba(0, 0, 0, 0.5)',
+            backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)',
+            zIndex: 55,
+          }}
+          onClick={() => setOpen(false)}
+          aria-hidden="true"
+        />,
+        document.body,
+      ) : null}
     </>
   );
 }
