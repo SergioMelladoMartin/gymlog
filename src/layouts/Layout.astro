@@ -40,6 +40,12 @@ const navTitle = {
           document.documentElement.setAttribute('data-theme', stored || (sysDark ? 'dark' : 'light'));
           var accent = localStorage.getItem('accent');
           if (accent && accent !== 'lime') document.documentElement.setAttribute('data-accent', accent);
+          // Apply the persisted "collapsed sidebar" preference before paint.
+          var collapsed = localStorage.getItem('sidenav-collapsed') === '1';
+          if (collapsed) document.body && document.body.classList.add('sidenav-collapsed');
+          // body may not exist yet during <head>; the class is also applied
+          // inline below as a fallback through the data attribute.
+          window.__gymlogSidenavCollapsed = collapsed;
         } catch (e) {}
       })();
     </script>
@@ -51,7 +57,15 @@ const navTitle = {
       }
     </script>
   </head>
-  <body class="min-h-dvh">
+  <body class="min-h-dvh" data-sidenav={activeNav !== 'login' ? '' : undefined}>
+    <script is:inline>
+      // Apply the collapsed-sidebar class on body (the head script ran before
+      // body existed). Idempotent across Astro client-side navigations.
+      try {
+        if (window.__gymlogSidenavCollapsed) document.body.classList.add('sidenav-collapsed');
+        else document.body.classList.remove('sidenav-collapsed');
+      } catch (e) {}
+    </script>
     <header class="sticky top-0 z-30 border-b border-border/70 backdrop-blur-xl" style="background: color-mix(in srgb, var(--color-bg) 75%, transparent);">
       <div class="mx-auto flex max-w-3xl items-center gap-3 px-4 py-3">
         {activeNav !== 'login' && <SideNav client:load transition:persist="sidenav" active={activeNav} />}

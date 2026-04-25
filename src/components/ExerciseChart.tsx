@@ -23,11 +23,19 @@ export interface SessionPoint {
 }
 
 type Metric = 'est_1rm' | 'top_weight' | 'total_volume';
+type RangeId = '1Y' | 'YTD' | '3Y' | 'ALL';
 
 const METRICS: { id: Metric; label: string; unit: string }[] = [
-  { id: 'est_1rm', label: '1RM estimado', unit: 'kg' },
+  { id: 'est_1rm', label: '1RM est.', unit: 'kg' },
   { id: 'top_weight', label: 'Top set', unit: 'kg' },
   { id: 'total_volume', label: 'Volumen', unit: 'kg' },
+];
+
+const RANGES: { id: RangeId; label: string }[] = [
+  { id: '1Y', label: '1A' },
+  { id: 'YTD', label: 'YTD' },
+  { id: '3Y', label: '3A' },
+  { id: 'ALL', label: 'Todo' },
 ];
 
 function readCssColors() {
@@ -50,9 +58,30 @@ function formatKg(n: number) {
   return Number.isInteger(r) ? String(r) : r.toFixed(1);
 }
 
+function rangeCutoff(rangeId: RangeId, lastDateISO: string): string | null {
+  if (rangeId === 'ALL') return null;
+  const last = new Date(lastDateISO + 'T00:00:00');
+  const cutoff = new Date(last);
+  if (rangeId === 'YTD') {
+    cutoff.setMonth(0, 1);
+  } else if (rangeId === '1Y') {
+    cutoff.setFullYear(cutoff.getFullYear() - 1);
+  } else if (rangeId === '3Y') {
+    cutoff.setFullYear(cutoff.getFullYear() - 3);
+  }
+  const y = cutoff.getFullYear();
+  const m = String(cutoff.getMonth() + 1).padStart(2, '0');
+  const d = String(cutoff.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
 export default function ExerciseChart({ data }: { data: SessionPoint[] }) {
   const [metric, setMetric] = useState<Metric>('est_1rm');
+  const [range, setRange] = useState<RangeId>('1Y');
   const [colors, setColors] = useState(readCssColors);
+  // Index of the data point currently under the user's finger / cursor.
+  // Powers the "scrubbing" banner above the chart.
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
 
   useEffect(() => {
     setColors(readCssColors());
@@ -63,7 +92,16 @@ export default function ExerciseChart({ data }: { data: SessionPoint[] }) {
 
   const active = METRICS.find((m) => m.id === metric)!;
 
-  const chartData = useMemo(() => data.map((d) => ({
+  // Filter by range first, then by metric. The metric switch only changes the
+  // y-value, range trims the visible window.
+  const filtered = useMemo(() => {
+    if (data.length === 0) return data;
+    const cutoff = rangeCutoff(range, data[data.length - 1].date);
+    if (!cutoff) return data;
+    return data.filter((d) => d.date >= cutoff);
+  }, [data, range]);
+
+  const chartData = useMemo(() => filtered.map((d) => ({
     date: d.date,
     value: Math.round(d[metric] * 10) / 10,
     top_set_weight: d.top_set_weight,
@@ -71,7 +109,7 @@ export default function ExerciseChart({ data }: { data: SessionPoint[] }) {
     rm_set_weight: d.rm_set_weight,
     rm_set_reps: d.rm_set_reps,
     set_count: d.set_count,
-  })), [data, metric]);
+  })), [filtered, metric]);
 
   const maxPoint = useMemo(() => {
     if (!chartData.length) return null;
@@ -80,12 +118,51 @@ export default function ExerciseChart({ data }: { data: SessionPoint[] }) {
     return best;
   }, [chartData]);
 
+  // Whatever point the finger/cursor is over — falls back to the latest point
+  // when nothing is hovered, so the banner is never empty.
+  const focusPoint = useMemo(() => {
+    if (chartData.length === 0) return null;
+    if (hoverIdx != null && chartData[hoverIdx]) return chartData[hoverIdx];
+    return chartData[chartData.length - 1];
+  }, [chartData, hoverIdx]);
+
   if (data.length === 0) {
     return <div className="text-sm text-muted">Sin histórico todavía.</div>;
   }
 
+  const handleMove = (state: any) => {
+    const idx = state?.activeTooltipIndex;
+    if (typeof idx === 'number' && idx >= 0) setHoverIdx(idx);
+  };
+  const handleLeave = () => setHoverIdx(null);
+
   return (
     <div>
+      {/* Scrubbing banner — what's under your finger right now. */}
+      {focusPoint && <ScrubBanner point={focusPoint} metric={metric} unit={active.unit} colors={colors} live={hoverIdx != null} />}
+
+      {/* Range chips */}
+      <div className="no-scrollbar mb-2 -mx-1 flex gap-1 overflow-x-auto px-1">
+        {RANGES.map((r) => {
+          const isActive = range === r.id;
+          return (
+            <button
+              key={r.id}
+              type="button"
+              onClick={() => setRange(r.id)}
+              className={`shrink-0 rounded-full px-3 py-1 text-[11px] font-semibold transition ${
+                isActive
+                  ? 'bg-fg/90 text-bg'
+                  : 'border border-border bg-card text-muted hover:text-fg'
+              }`}
+            >
+              {r.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Metric chips */}
       <div className="mb-3 flex gap-1.5">
         {METRICS.map((m) => (
           <button
@@ -103,87 +180,97 @@ export default function ExerciseChart({ data }: { data: SessionPoint[] }) {
         ))}
       </div>
 
-      <div className="h-64 w-full">
-        <ResponsiveContainer>
-          <AreaChart data={chartData} margin={{ top: 12, right: 12, bottom: 0, left: -16 }}>
-            <defs>
-              <linearGradient id="fill" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor={colors.accent} stopOpacity={0.45} />
-                <stop offset="100%" stopColor={colors.accent} stopOpacity={0} />
-              </linearGradient>
-            </defs>
-            <CartesianGrid stroke={colors.grid} strokeDasharray="3 3" />
-            <XAxis
-              dataKey="date"
-              tick={{ fill: colors.muted, fontSize: 11 }}
-              tickFormatter={(v: string) => {
-                const d = new Date(v + 'T00:00:00');
-                const m = d.toLocaleDateString('es-ES', { month: 'short' }).replace('.', '');
-                return `${m} ${String(d.getFullYear()).slice(2)}`;
-              }}
-              minTickGap={40}
-              axisLine={{ stroke: colors.grid }}
-              tickLine={{ stroke: colors.grid }}
-            />
-            <YAxis
-              tick={{ fill: colors.muted, fontSize: 11 }}
-              width={42}
-              domain={['auto', 'auto']}
-              axisLine={false}
-              tickLine={false}
-            />
-            {maxPoint && (
-              <ReferenceLine
-                y={maxPoint.value}
-                stroke={colors.accent}
-                strokeDasharray="4 4"
-                strokeOpacity={0.7}
-                strokeWidth={1}
-                label={{
-                  value: `máx ${formatKg(maxPoint.value)} ${active.unit}`,
-                  position: 'insideTopRight',
-                  fill: colors.accent,
-                  fontSize: 10,
-                  fontWeight: 600,
+      {chartData.length === 0 ? (
+        <div className="flex h-64 items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted">
+          Sin sesiones en este rango.
+        </div>
+      ) : (
+        <div
+          className="h-64 w-full select-none touch-none"
+          // touch-none keeps the page from vertically scrolling while the
+          // user scrubs the chart with a finger.
+        >
+          <ResponsiveContainer>
+            <AreaChart
+              data={chartData}
+              margin={{ top: 12, right: 12, bottom: 0, left: -16 }}
+              onMouseMove={handleMove}
+              onMouseLeave={handleLeave}
+              onTouchMove={handleMove as any}
+              onTouchEnd={handleLeave}
+            >
+              <defs>
+                <linearGradient id="fill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={colors.accent} stopOpacity={0.45} />
+                  <stop offset="100%" stopColor={colors.accent} stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid stroke={colors.grid} strokeDasharray="3 3" />
+              <XAxis
+                dataKey="date"
+                tick={{ fill: colors.muted, fontSize: 11 }}
+                tickFormatter={(v: string) => {
+                  const d = new Date(v + 'T00:00:00');
+                  const m = d.toLocaleDateString('es-ES', { month: 'short' }).replace('.', '');
+                  return `${m} ${String(d.getFullYear()).slice(2)}`;
                 }}
+                minTickGap={40}
+                axisLine={{ stroke: colors.grid }}
+                tickLine={{ stroke: colors.grid }}
               />
-            )}
-            <Tooltip
-              cursor={{ stroke: colors.muted, strokeDasharray: '3 3' }}
-              content={<CustomTooltip metric={metric} unit={active.unit} colors={colors} />}
-            />
-            <Area
-              type="monotone"
-              dataKey="value"
-              stroke={colors.accent}
-              strokeWidth={2}
-              fill="url(#fill)"
-              activeDot={{ r: 4, stroke: colors.bg, strokeWidth: 2, fill: colors.accent }}
-            />
-          </AreaChart>
-        </ResponsiveContainer>
-      </div>
+              <YAxis
+                tick={{ fill: colors.muted, fontSize: 11 }}
+                width={42}
+                domain={['auto', 'auto']}
+                axisLine={false}
+                tickLine={false}
+              />
+              {maxPoint && (
+                <ReferenceLine
+                  y={maxPoint.value}
+                  stroke={colors.accent}
+                  strokeDasharray="4 4"
+                  strokeOpacity={0.7}
+                  strokeWidth={1}
+                  label={{
+                    value: `máx ${formatKg(maxPoint.value)} ${active.unit}`,
+                    position: 'insideTopRight',
+                    fill: colors.accent,
+                    fontSize: 10,
+                    fontWeight: 600,
+                  }}
+                />
+              )}
+              <Tooltip
+                cursor={{ stroke: colors.accent, strokeOpacity: 0.6, strokeWidth: 1 }}
+                content={() => null}
+              />
+              <Area
+                type="monotone"
+                dataKey="value"
+                stroke={colors.accent}
+                strokeWidth={2}
+                fill="url(#fill)"
+                isAnimationActive={false}
+                activeDot={{ r: 5, stroke: colors.bg, strokeWidth: 2, fill: colors.accent }}
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      )}
     </div>
   );
 }
 
-function CustomTooltip({
-  active,
-  payload,
-  label,
+function ScrubBanner({
+  point,
   metric,
   unit,
   colors,
+  live,
 }: {
-  active?: boolean;
-  payload?: Array<{ payload: any }>;
-  label?: string;
-  metric: Metric;
-  unit: string;
-  colors: { card: string; grid: string; fg: string; muted: string };
-}) {
-  if (!active || !payload?.length) return null;
-  const p = payload[0].payload as {
+  point: {
+    date: string;
     value: number;
     top_set_weight: number;
     top_set_reps: number;
@@ -191,42 +278,40 @@ function CustomTooltip({
     rm_set_reps: number;
     set_count: number;
   };
+  metric: Metric;
+  unit: string;
+  colors: { fg: string; muted: string };
+  live: boolean;
+}) {
+  const prettyDate = new Date(point.date + 'T00:00:00')
+    .toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
 
-  const prettyDate = label
-    ? new Date(label + 'T00:00:00').toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
-    : '';
-
-  let detail: string | null = null;
+  let detail: string;
   if (metric === 'est_1rm') {
-    detail = `serie: ${formatKg(p.rm_set_weight)} kg × ${p.rm_set_reps} reps`;
+    detail = `${formatKg(point.rm_set_weight)} kg × ${point.rm_set_reps} reps`;
   } else if (metric === 'top_weight') {
-    detail = `serie: ${formatKg(p.top_set_weight)} kg × ${p.top_set_reps} reps`;
+    detail = `${formatKg(point.top_set_weight)} kg × ${point.top_set_reps} reps`;
   } else {
-    detail = `${p.set_count} sets en el día`;
+    detail = `${point.set_count} ${point.set_count === 1 ? 'serie' : 'series'} en el día`;
   }
 
   return (
-    <div
-      style={{
-        background: colors.card,
-        border: `1px solid ${colors.grid}`,
-        borderRadius: 10,
-        padding: '8px 10px',
-        fontSize: 12,
-        color: colors.fg,
-        minWidth: 160,
-        boxShadow: '0 8px 24px -12px rgba(0,0,0,0.4)',
-      }}
-    >
-      <div style={{ color: colors.muted, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>
-        {prettyDate}
+    <div className="mb-2 flex items-center justify-between rounded-xl border border-border bg-card/60 px-3 py-2">
+      <div className="min-w-0">
+        <div
+          className="text-[10px] font-medium uppercase tracking-wider"
+          style={{ color: colors.muted }}
+        >
+          {prettyDate}{live ? '' : ' · último'}
+        </div>
+        <div className="mt-0.5 truncate text-xs text-muted">{detail}</div>
       </div>
-      <div style={{ fontWeight: 600, fontSize: 14 }}>
-        {formatKg(p.value)} <span style={{ color: colors.muted, fontSize: 11 }}>{unit}</span>
+      <div className="text-right">
+        <span className="text-xl font-semibold tabular-nums tracking-tight">
+          {formatKg(point.value)}
+        </span>
+        <span className="ml-1 text-xs text-muted">{unit}</span>
       </div>
-      {detail && (
-        <div style={{ marginTop: 2, color: colors.muted, fontSize: 11 }}>{detail}</div>
-      )}
     </div>
   );
 }

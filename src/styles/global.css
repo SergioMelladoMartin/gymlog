@@ -100,15 +100,19 @@
     text-rendering: optimizeLegibility;
   }
 
-  /* When the SideNav component detects a desktop viewport it adds
-     `has-sidenav` on <html>. Shift page content right so the always-open
-     sidebar doesn't cover it. */
-  html.has-sidenav body {
-    padding-left: 260px;
-    transition: padding-left 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
-  }
-  html.has-sidenav.sidenav-collapsed body {
-    padding-left: 72px;
+  /* Astro Layout sets `data-sidenav` on <body> for every page that has the
+     sidebar (everything except /login). At >= 1024px we shift the page
+     content right by the sidebar width so the always-pinned drawer never
+     covers the main column. The class lives on <body> declaratively from
+     the SSR'd HTML, so there is no flash on hydration. */
+  @media (min-width: 1024px) {
+    body[data-sidenav] {
+      padding-left: 260px;
+      transition: padding-left 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    }
+    body[data-sidenav].sidenav-collapsed {
+      padding-left: 72px;
+    }
   }
 
   body {

@@ -49,9 +49,6 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
   // Exercises chosen via the picker but without any sets yet. They still
   // deserve a card so the user can log their first set.
   const [pendingExerciseIds, setPendingExerciseIds] = useState<number[]>([]);
-  // ex_id → timestamp ms of the last set added in this session. Powers the
-  // rest-timer chip on each card.
-  const [lastSetAt, setLastSetAt] = useState<Record<number, number>>({});
   // Which card currently has its "add set" form expanded. Only one at a time
   // so the sets you've already logged stay easy to read — the form was
   // cluttering the view when it was always-on.
@@ -107,7 +104,6 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
   function addSet(exerciseId: number, weight: number, reps: number) {
     const result = qCreateSet({ exercise_id: exerciseId, date, weight_kg: weight, reps });
     refreshSets();
-    setLastSetAt((prev) => ({ ...prev, [exerciseId]: Date.now() }));
     setPendingExerciseIds((prev) => prev.filter((id) => id !== exerciseId));
     // Light tap on save, stronger triple-buzz if we just set a PR.
     if (result?.pr_weight || result?.pr_1rm || result?.pr_reps) vibrate([20, 40, 20, 40, 40]);
@@ -124,7 +120,6 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
       distance_m: distanceM,
     });
     refreshSets();
-    setLastSetAt((prev) => ({ ...prev, [exerciseId]: Date.now() }));
     setPendingExerciseIds((prev) => prev.filter((id) => id !== exerciseId));
     vibrate(10);
   }
@@ -264,12 +259,9 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
                 style={{ boxShadow: `inset 3px 0 0 ${catColor}` }}
               >
                 <header className="flex items-center justify-between gap-2 px-4 py-3">
-                  <div className="flex min-w-0 flex-1 items-center gap-2">
-                    <a href={`/exercise?id=${exerciseId}`} className="min-w-0 truncate font-semibold tracking-tight hover:underline">
-                      {ex?.name ?? `#${exerciseId}`}
-                    </a>
-                    <RestTimer startedAt={lastSetAt[exerciseId]} />
-                  </div>
+                  <a href={`/exercise?id=${exerciseId}`} className="min-w-0 flex-1 truncate font-semibold tracking-tight hover:underline">
+                    {ex?.name ?? `#${exerciseId}`}
+                  </a>
                   <span className="hidden shrink-0 text-xs tabular-nums text-muted sm:inline">
                     {exSets.length === 0
                       ? t('workout.noSetsYet')
@@ -1204,40 +1196,6 @@ function formatDistance(meters: number): string {
     return `${km % 1 === 0 ? km.toFixed(0) : km.toFixed(2).replace(/\.?0+$/, '')} km`;
   }
   return `${Math.round(meters)} m`;
-}
-
-function RestTimer({ startedAt }: { startedAt?: number }) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!startedAt) return;
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, [startedAt]);
-  if (!startedAt) return null;
-  const elapsed = Math.max(0, Math.floor((now - startedAt) / 1000));
-  if (elapsed > 600) return null; // stop showing after 10 min of idle
-  const m = Math.floor(elapsed / 60);
-  const s = elapsed % 60;
-  // Colour hints: <60s red (too soon), 60–120s amber (stay sharp), >120s dim.
-  const tone =
-    elapsed < 60
-      ? 'border-danger/40 bg-danger/10 text-danger'
-      : elapsed < 120
-        ? 'border-amber-400/40 bg-amber-400/10 text-amber-400'
-        : 'border-border bg-elevated text-muted';
-  return (
-    <span
-      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold tabular-nums ${tone}`}
-      title="Tiempo desde la última serie"
-    >
-      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="12" cy="13" r="8" />
-        <path d="M12 9v4l2 2" />
-        <path d="M9 2h6" />
-      </svg>
-      {m}:{String(s).padStart(2, '0')}
-    </span>
-  );
 }
 
 function relativeDate(iso: string) {

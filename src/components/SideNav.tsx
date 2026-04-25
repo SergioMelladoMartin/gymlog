@@ -116,20 +116,21 @@ export default function SideNav({ active }: Props) {
     return () => mq.removeEventListener('change', update);
   }, []);
 
-  // Reflect the desktop state on <html> so the Layout can shift its main
-  // column via a CSS rule without having to thread props around.
+  // The body already carries `data-sidenav` (set declaratively by Astro
+  // Layout for every non-login page), so we only manage the *collapsed*
+  // class on <body>. Avoids the previous flicker where the JS toggle
+  // ran a tick after first paint.
   useEffect(() => {
-    document.documentElement.classList.toggle('has-sidenav', isDesktop);
-  }, [isDesktop]);
-
-  useEffect(() => {
-    document.documentElement.classList.toggle('sidenav-collapsed', isDesktop && collapsed);
+    document.body.classList.toggle('sidenav-collapsed', isDesktop && collapsed);
   }, [isDesktop, collapsed]);
 
   function toggleCollapsed() {
     setCollapsed((c) => {
       const next = !c;
-      try { localStorage.setItem('sidenav-collapsed', next ? '1' : '0'); } catch {}
+      try {
+        localStorage.setItem('sidenav-collapsed', next ? '1' : '0');
+        (window as any).__gymlogSidenavCollapsed = next;
+      } catch {}
       return next;
     });
   }
