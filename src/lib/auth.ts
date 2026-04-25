@@ -74,6 +74,10 @@ function readCachedToken(): CachedToken | null {
     if (parsed.expiresAt > Date.now() + 30_000) {
       memoryToken = { token: parsed.token, expiresAt: parsed.expiresAt };
       if (parsed.profile) userProfile = parsed.profile;
+      // Re-arm the proactive refresh timer for tokens loaded from a
+      // previous session — otherwise we'd only schedule it the very
+      // first time storeToken runs in this page lifetime.
+      scheduleProactiveRefresh(parsed.expiresAt);
       return memoryToken;
     }
   } catch {}
@@ -90,6 +94,68 @@ function storeToken(token: string, expiresIn: number, profile?: UserProfile) {
     );
   } catch {}
   if (profile) userProfile = profile;
+  scheduleProactiveRefresh(expiresAt);
+}
+
+// ── proactive silent refresh ─────────────────────────────────────────────
+//
+// Google's browser-only OAuth flow only ever issues 1 h access tokens.
+// Without a refresh token (which would require a backend secret), the
+// only way to keep the session alive is to silently re-request a token
+// while we still have a valid Google session cookie — `prompt: ''`.
+//
+// Doing it lazily (only when the token actually runs out) means a stale
+// or paused tab can lose the chance, and the user is forced to re-auth.
+// Refreshing ~2 min before expiry while the tab is foregrounded turns
+// this into a no-op for Chrome / Firefox / Edge (silent refresh works,
+// user sees nothing). On iOS Safari with third-party cookies blocked
+// the silent attempt may still fail, but at most once an hour — and a
+// single tap on the sync pill recovers.
+let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+function scheduleProactiveRefresh(expiresAt: number) {
+  if (refreshTimer) clearTimeout(refreshTimer);
+  // Fire 2 minutes before expiry, with a sane minimum of 30 s.
+  const delay = Math.max(30_000, expiresAt - Date.now() - 120_000);
+  refreshTimer = setTimeout(() => {
+    void silentRefresh();
+  }, delay);
+}
+
+async function silentRefresh(): Promise<void> {
+  // Skip if the user is offline or the tab is hidden — we'll try again
+  // when they come back.
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+  if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+    // try again when foregrounded
+    return;
+  }
+  // Force a refresh even if the cached token still has time left, by
+  // wiping the in-memory copy first. localStorage stays as a fallback.
+  memoryToken = null;
+  try {
+    await getAccessToken(false); // silent, will reschedule on success
+  } catch (e) {
+    console.warn('[auth] proactive refresh failed; will retry on next user action', e);
+    // On failure don't keep retrying in a loop — wait for user activity.
+  }
+}
+
+if (typeof window !== 'undefined') {
+  // When the tab comes back into focus, top up the token if we missed a
+  // scheduled refresh while hidden / suspended (mobile lifecycle).
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    const cached = memoryToken;
+    if (!cached) return;
+    const remaining = cached.expiresAt - Date.now();
+    if (remaining < 5 * 60_000) void silentRefresh();
+  });
+  window.addEventListener('online', () => {
+    const cached = memoryToken;
+    if (!cached) return;
+    const remaining = cached.expiresAt - Date.now();
+    if (remaining < 5 * 60_000) void silentRefresh();
+  });
 }
 
 // ── public API ───────────────────────────────────────────────────────────
@@ -208,6 +274,7 @@ export async function signOut(): Promise<void> {
   }
   memoryToken = null;
   userProfile = null;
+  if (refreshTimer) { clearTimeout(refreshTimer); refreshTimer = null; }
   try {
     localStorage.removeItem(STORAGE_KEY);
   } catch {}
