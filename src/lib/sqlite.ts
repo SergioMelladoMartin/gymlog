@@ -555,11 +555,16 @@ export function onSyncChange(fn: (info: { state: SyncState; lastSyncAt: number |
   return () => { syncListeners.delete(fn); };
 }
 
+// Shorter debounce — 1.5s feels almost instant for the user but still
+// groups bursts of rapid edits (e.g. tapping +2.5 a couple of times in a
+// row) into a single Drive upload.
+const SYNC_DEBOUNCE_MS = 1500;
+
 export function markDirty() {
   dirty = true;
   if (syncState !== 'syncing') setSyncState('dirty');
   if (flushTimer) return;
-  flushTimer = setTimeout(() => flushToDrive().catch(() => {}), 5000);
+  flushTimer = setTimeout(() => flushToDrive().catch(() => {}), SYNC_DEBOUNCE_MS);
 }
 
 async function flushToDrive(): Promise<void> {
@@ -639,6 +644,19 @@ export function exportBytes(): Uint8Array {
 export async function flushNow(): Promise<void> {
   if (!dirty) return;
   return flushToDrive();
+}
+
+/** User-triggered "sincroniza ya" — pushes pending edits and then pulls
+ *  any remote updates from another device. Always does both legs so the
+ *  pill click always reconciles, even when nothing is dirty locally.
+ *  Returns once both halves complete. */
+export async function forceSync(): Promise<void> {
+  // Cancel any debounce so flushToDrive doesn't double-fire.
+  if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+  if (dirty) {
+    try { await flushToDrive(); } catch (e) { console.error('[forceSync] push', e); }
+  }
+  try { await pullRemoteIfNewer(); } catch (e) { console.error('[forceSync] pull', e); }
 }
 
 if (typeof window !== 'undefined') {

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { flushNow, getSyncInfo, onSyncChange, type SyncState } from '../lib/sqlite';
+import { forceSync, getSyncInfo, onSyncChange, type SyncState } from '../lib/sqlite';
 import { useT } from '../hooks/useT';
 
 /**
@@ -41,7 +41,6 @@ export default function SyncStatus() {
   let tone = 'text-muted';
   let icon: React.ReactNode = null;
   let label = '';
-  let clickable = false;
   let aria = '';
 
   if (!online) {
@@ -58,41 +57,34 @@ export default function SyncStatus() {
     tone = 'text-amber-400';
     label = t('sync.dirty');
     icon = <DotIcon filled />;
-    aria = t('sync.dirty');
+    aria = `${t('sync.dirty')} — ${t('action.retry')}`;
   } else if (effState === 'error') {
     tone = 'text-danger';
     label = t('sync.error');
     icon = <WarnIcon />;
-    clickable = true;
     aria = `${t('sync.error')} — ${t('action.retry')}`;
   } else {
     tone = 'text-muted';
     label = relativeSync(lastSyncAt, t);
     icon = <CheckIcon />;
-    aria = `${t('sync.synced')} ${label}`;
+    aria = `${t('sync.synced')} ${label} — ${t('action.retry')}`;
   }
 
-  const className = `inline-flex items-center gap-1 rounded-full border border-border bg-card/70 px-2 py-1 text-[11px] font-medium tabular-nums ${tone}`;
-
-  if (clickable) {
-    return (
-      <button
-        type="button"
-        onClick={() => flushNow().catch(() => {})}
-        title={aria}
-        aria-label={aria}
-        className={`${className} transition hover:bg-elevated`}
-      >
-        {icon}
-        <span className="hidden sm:inline">{label}</span>
-      </button>
-    );
-  }
+  // The pill is always clickable: tap it and we flush whatever's pending
+  // and pull anything new from Drive. Useful when the user wants to
+  // force a sync because something looks stale.
   return (
-    <span title={aria} aria-label={aria} className={className}>
+    <button
+      type="button"
+      onClick={() => forceSync().catch(() => {})}
+      disabled={effState === 'syncing'}
+      title={aria}
+      aria-label={aria}
+      className={`inline-flex items-center gap-1 rounded-full border border-border bg-card/70 px-2 py-1 text-[11px] font-medium tabular-nums transition hover:bg-elevated disabled:cursor-wait ${tone}`}
+    >
       {icon}
       <span className="hidden sm:inline">{label}</span>
-    </span>
+    </button>
   );
 }
 
