@@ -377,11 +377,28 @@ async function opfsDelete(): Promise<void> {
 
 // ── lifecycle ──────────────────────────────────────────────────────────
 
+/** Ask the browser for "persistent" storage. On iOS Safari and Chrome
+ *  this prevents OPFS / localStorage from being cleared automatically
+ *  after a few days of inactivity, which is the most common cause of
+ *  "I logged a set yesterday and now it's gone". Best-effort — browsers
+ *  may grant or deny without prompting. */
+async function requestPersistentStorage(): Promise<void> {
+  try {
+    if (typeof navigator !== 'undefined' && navigator.storage?.persist) {
+      const already = await navigator.storage.persisted?.();
+      if (!already) await navigator.storage.persist();
+    }
+  } catch {
+    // ignore — purely a nice-to-have
+  }
+}
+
 export async function loadDatabase(options: { seedUrl?: string } = {}): Promise<void> {
   if (status === 'loading' || status === 'ready') return;
   setStatus('loading');
   try {
     await initSqlite();
+    void requestPersistentStorage();
 
     // 1. Prefer a copy already in OPFS (fastest startup).
     let bytes = await opfsRead();

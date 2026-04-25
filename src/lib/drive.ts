@@ -9,6 +9,22 @@ const UPLOAD_API = 'https://www.googleapis.com/upload/drive/v3';
 
 let cachedFileId: string | null = null;
 
+// Drive operations occasionally hang on flaky mobile networks; without a
+// timeout the inFlight promise in sqlite.ts could pin the sync state to
+// "syncing" forever and block subsequent flushes. 30s is plenty for a
+// 200KB upload and short enough that we can recover by retrying.
+const DRIVE_TIMEOUT_MS = 30_000;
+
+async function timedFetch(input: RequestInfo, init: RequestInit = {}): Promise<Response> {
+  const ac = new AbortController();
+  const t = setTimeout(() => ac.abort(), DRIVE_TIMEOUT_MS);
+  try {
+    return await fetch(input, { ...init, signal: ac.signal });
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 async function authHeaders(extra: Record<string, string> = {}): Promise<Headers> {
   const token = await getAccessToken();
   const h = new Headers(extra);
@@ -24,7 +40,7 @@ async function findFile(retryOn403 = true): Promise<{ id: string; modifiedTime: 
     fields: 'files(id, modifiedTime, size)',
     pageSize: '1',
   });
-  const res = await fetch(`${DRIVE_API}/files?${params}`, { headers });
+  const res = await timedFetch(`${DRIVE_API}/files?${params}`, { headers });
   if (res.status === 403 && retryOn403) {
     // Token lacks drive.appdata. Re-prompt for consent with the Drive
     // checkbox and try once more.
@@ -50,7 +66,7 @@ export async function pullBlobFromDrive(): Promise<ArrayBuffer | null> {
   const file = await findFile();
   if (!file) return null;
   const headers = await authHeaders();
-  const res = await fetch(`${DRIVE_API}/files/${file.id}?alt=media`, { headers });
+  const res = await timedFetch(`${DRIVE_API}/files/${file.id}?alt=media`, { headers });
   if (!res.ok) throw new Error(`drive download failed: ${res.status}`);
   return res.arrayBuffer();
 }
@@ -81,7 +97,7 @@ async function createFile(bytes: Uint8Array): Promise<string> {
   body.set(closing, preamble.length + bytes.length);
 
   headers.set('Content-Type', `multipart/related; boundary=${boundary}`);
-  const res = await fetch(`${UPLOAD_API}/files?uploadType=multipart&fields=id`, {
+  const res = await timedFetch(`${UPLOAD_API}/files?uploadType=multipart&fields=id`, {
     method: 'POST',
     headers,
     body,
@@ -95,7 +111,7 @@ async function createFile(bytes: Uint8Array): Promise<string> {
 async function updateFile(fileId: string, bytes: Uint8Array): Promise<void> {
   const headers = await authHeaders();
   headers.set('Content-Type', 'application/vnd.sqlite3');
-  const res = await fetch(`${UPLOAD_API}/files/${fileId}?uploadType=media`, {
+  const res = await timedFetch(`${UPLOAD_API}/files/${fileId}?uploadType=media`, {
     method: 'PATCH',
     headers,
     body: bytes,
@@ -116,7 +132,7 @@ export async function deleteBlobFromDrive(): Promise<boolean> {
   const existing = await findFile();
   if (!existing) return false;
   const headers = await authHeaders();
-  const res = await fetch(`${DRIVE_API}/files/${existing.id}`, {
+  const res = await timedFetch(`${DRIVE_API}/files/${existing.id}`, {
     method: 'DELETE',
     headers,
   });

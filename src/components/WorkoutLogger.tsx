@@ -402,7 +402,11 @@ function QuickAdd({
     if (isNaN(w) || isNaN(r) || r <= 0) return;
     submittingRef.current = true;
     onAdd(exerciseId, w, r);
-    setDraft({ weight: String(w), reps: '' });
+    // Keep BOTH weight and reps from the just-saved set — most users go for
+    // the same load + reps combo for several sets in a row. The submitting
+    // ref already guards against double-tap double-saves, so leaving reps
+    // populated is safe.
+    setDraft({ weight: String(w), reps: String(r) });
     setJustAdded(true);
     setTimeout(() => { setJustAdded(false); submittingRef.current = false; }, 400);
     weightRef.current?.focus();
