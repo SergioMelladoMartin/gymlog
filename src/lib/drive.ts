@@ -7,7 +7,22 @@ const FILE_NAME = 'gymlog.fitnotes';
 const DRIVE_API = 'https://www.googleapis.com/drive/v3';
 const UPLOAD_API = 'https://www.googleapis.com/upload/drive/v3';
 
-let cachedFileId: string | null = null;
+// File ID cache survives across sessions so the very first push doesn't
+// have to spend a round-trip on `findFile()`. Drive returns the same id
+// for the lifetime of the file, so storing it locally is safe — the
+// worst case is the file got deleted on the server, in which case our
+// PATCH 404s and we fall back to find/create.
+const LS_FILE_ID = 'gymlog-drive-file-id';
+let cachedFileId: string | null = (() => {
+  try { return typeof localStorage !== 'undefined' ? localStorage.getItem(LS_FILE_ID) : null; } catch { return null; }
+})();
+function setCachedFileId(id: string | null) {
+  cachedFileId = id;
+  try {
+    if (id) localStorage.setItem(LS_FILE_ID, id);
+    else localStorage.removeItem(LS_FILE_ID);
+  } catch {}
+}
 
 // Drive operations occasionally hang on flaky mobile networks; without a
 // timeout the inFlight promise in sqlite.ts could pin the sync state to
@@ -57,7 +72,7 @@ async function findFile(retryOn403 = true): Promise<{ id: string; modifiedTime: 
   const data = await res.json();
   const file = data.files?.[0];
   if (!file) return null;
-  cachedFileId = file.id;
+  setCachedFileId(file.id);
   return { id: file.id, modifiedTime: file.modifiedTime, size: Number(file.size ?? 0) };
 }
 
@@ -75,7 +90,7 @@ export async function getRemoteMeta() {
   return findFile();
 }
 
-async function createFile(bytes: Uint8Array): Promise<string> {
+async function createFile(bytes: Uint8Array): Promise<{ id: string; modifiedTime: string; size: number }> {
   const headers = await authHeaders();
   const boundary = 'gymlog-' + Math.random().toString(36).slice(2);
   const metadata = {
@@ -97,32 +112,53 @@ async function createFile(bytes: Uint8Array): Promise<string> {
   body.set(closing, preamble.length + bytes.length);
 
   headers.set('Content-Type', `multipart/related; boundary=${boundary}`);
-  const res = await timedFetch(`${UPLOAD_API}/files?uploadType=multipart&fields=id`, {
+  // Ask Drive to echo the new modifiedTime/size in the response so we
+  // don't need a separate findFile() round-trip after a push.
+  const res = await timedFetch(`${UPLOAD_API}/files?uploadType=multipart&fields=id,modifiedTime,size`, {
     method: 'POST',
     headers,
     body,
   });
   if (!res.ok) throw new Error(`drive create failed: ${res.status} ${await res.text()}`);
   const data = await res.json();
-  cachedFileId = data.id;
-  return data.id;
+  setCachedFileId(data.id);
+  return { id: data.id, modifiedTime: data.modifiedTime, size: Number(data.size ?? 0) };
 }
 
-async function updateFile(fileId: string, bytes: Uint8Array): Promise<void> {
+async function updateFile(fileId: string, bytes: Uint8Array): Promise<{ id: string; modifiedTime: string; size: number }> {
   const headers = await authHeaders();
   headers.set('Content-Type', 'application/vnd.sqlite3');
-  const res = await timedFetch(`${UPLOAD_API}/files/${fileId}?uploadType=media`, {
+  const res = await timedFetch(`${UPLOAD_API}/files/${fileId}?uploadType=media&fields=id,modifiedTime,size`, {
     method: 'PATCH',
     headers,
     body: bytes,
   });
   if (!res.ok) throw new Error(`drive update failed: ${res.status} ${await res.text()}`);
+  const data = await res.json();
+  return { id: data.id, modifiedTime: data.modifiedTime, size: Number(data.size ?? 0) };
 }
 
-export async function pushBlobToDrive(bytes: Uint8Array): Promise<void> {
+/** Push the bytes to Drive. Returns the new file metadata so the caller
+ *  can update its stored sync watermark in one go (no extra round-trip).
+ *  Tries the cached file id first to avoid a `findFile()` request — falls
+ *  back to find/create if the file got deleted on the server. */
+export async function pushBlobToDrive(
+  bytes: Uint8Array,
+): Promise<{ id: string; modifiedTime: string; size: number }> {
+  if (cachedFileId) {
+    try {
+      return await updateFile(cachedFileId, bytes);
+    } catch (e: any) {
+      // 404 → file vanished from Drive; clear cache and fall through.
+      // Other errors (timeout, 5xx) bubble up.
+      const msg = e?.message ?? '';
+      if (!/404|not.?found/i.test(msg)) throw e;
+      setCachedFileId(null);
+    }
+  }
   const existing = await findFile();
-  if (existing) await updateFile(existing.id, bytes);
-  else await createFile(bytes);
+  if (existing) return updateFile(existing.id, bytes);
+  return createFile(bytes);
 }
 
 /** Permanently delete the gymlog.fitnotes file from the user's Drive
@@ -139,10 +175,10 @@ export async function deleteBlobFromDrive(): Promise<boolean> {
   if (!res.ok && res.status !== 404) {
     throw new Error(`drive delete failed: ${res.status} ${await res.text()}`);
   }
-  cachedFileId = null;
+  setCachedFileId(null);
   return true;
 }
 
 export function clearCache() {
-  cachedFileId = null;
+  setCachedFileId(null);
 }

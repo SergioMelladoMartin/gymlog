@@ -410,9 +410,8 @@ export async function loadDatabase(options: { seedUrl?: string } = {}): Promise<
     //     overwrite our local changes with whatever Drive last had.
     if (bytes && isPending() && isSignedIn()) {
       try {
-        await pushBlobToDrive(bytes);
-        const meta = await getRemoteMeta().catch(() => null);
-        if (meta) writeStoredMeta(meta);
+        const meta = await pushBlobToDrive(bytes);
+        writeStoredMeta({ modifiedTime: meta.modifiedTime, size: meta.size });
         setLastSyncAt(Date.now());
         setPending(false);
         console.log('[sync] self-heal: pushed pending OPFS bytes to Drive');
@@ -640,9 +639,11 @@ async function flushToDrive(): Promise<void> {
     try {
       const bytes = serialize(db!);
       await opfsWrite(bytes);
-      await pushBlobToDrive(bytes);
-      const meta = await getRemoteMeta().catch(() => null);
-      if (meta) writeStoredMeta(meta);
+      // pushBlobToDrive returns the new modifiedTime/size so we don't
+      // need a separate getRemoteMeta() round-trip — that extra call is
+      // what was making the "syncing" pill linger on slow connections.
+      const meta = await pushBlobToDrive(bytes);
+      writeStoredMeta({ modifiedTime: meta.modifiedTime, size: meta.size });
       setLastSyncAt(Date.now());
       // Only clear the pending bit if no new mutation came in mid-flight.
       if (!dirty) setPending(false);
