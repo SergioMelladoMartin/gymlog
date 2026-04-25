@@ -386,10 +386,33 @@ export async function loadDatabase(options: { seedUrl?: string } = {}): Promise<
     // 1. Prefer a copy already in OPFS (fastest startup).
     let bytes = await opfsRead();
 
+    // 1b. SELF-HEAL: if a previous session exited with `pending=true`
+    //     (we marked the DB dirty but Drive never confirmed the push),
+    //     the OPFS copy is the source of truth. Push it BEFORE checking
+    //     remote, otherwise the remote-newer check below would happily
+    //     overwrite our local changes with whatever Drive last had.
+    if (bytes && isPending() && isSignedIn()) {
+      try {
+        await pushBlobToDrive(bytes);
+        const meta = await getRemoteMeta().catch(() => null);
+        if (meta) writeStoredMeta(meta);
+        setLastSyncAt(Date.now());
+        setPending(false);
+        console.log('[sync] self-heal: pushed pending OPFS bytes to Drive');
+      } catch (e) {
+        console.error('[sync] self-heal push failed; will retry later', e);
+        // Keep the pending flag set so the next online/visibility event
+        // tries again. Skip the remote-newer check below (we don't want
+        // to clobber our unpushed changes with a possibly older Drive
+        // copy).
+      }
+    }
+
     // 2. If signed in, check Drive. Prefer the remote copy when it is newer
     //    than what we have cached locally — otherwise changes made on another
     //    device (e.g. the phone) would never show up until OPFS is wiped.
-    if (isSignedIn()) {
+    //    Skipped while pending: those bytes are not safe to overwrite yet.
+    if (isSignedIn() && !isPending()) {
       const meta = await getRemoteMeta().catch(() => null);
       if (meta) {
         const stored = readStoredMeta();
@@ -515,13 +538,27 @@ export function getDb(): Database {
   return db;
 }
 
-// ── sync to Drive (debounced) ──────────────────────────────────────────
+// ── sync to Drive ─────────────────────────────────────────────────────
+//
+// Reliability model:
+//   1. Every mutation calls `markDirty()` which immediately kicks off a
+//      Drive push (no debounce). Multiple mutations in quick succession
+//      coalesce via the in-flight check + a "still dirty after flush"
+//      re-fire — so the server is hit at most once per push round-trip,
+//      not once per keystroke.
+//   2. The "I have unpushed changes" bit is persisted to localStorage so
+//      a session that died mid-push (mobile backgrounding, network drop,
+//      page close) can self-heal on the next load: before any remote-
+//      newer check, we re-push the OPFS bytes to Drive.
+//   3. `online` and `visibilitychange → visible` both re-attempt the push
+//      if the pending flag is still set, catching cases where the user
+//      came back to a previously-failed device.
 
 export type SyncState = 'idle' | 'dirty' | 'syncing' | 'error';
 const LS_LAST_SYNC = 'gymlog-last-sync';
+const LS_PENDING = 'gymlog-sync-pending';
 
 let dirty = false;
-let flushTimer: ReturnType<typeof setTimeout> | null = null;
 let inFlight: Promise<void> | null = null;
 let syncState: SyncState = 'idle';
 let lastSyncAt: number | null = (() => {
@@ -545,6 +582,16 @@ function setLastSyncAt(ts: number | null) {
   for (const l of syncListeners) l({ state: syncState, lastSyncAt });
 }
 
+function isPending(): boolean {
+  try { return localStorage.getItem(LS_PENDING) === '1'; } catch { return false; }
+}
+function setPending(v: boolean): void {
+  try {
+    if (v) localStorage.setItem(LS_PENDING, '1');
+    else localStorage.removeItem(LS_PENDING);
+  } catch {}
+}
+
 export function getSyncInfo(): { state: SyncState; lastSyncAt: number | null } {
   return { state: syncState, lastSyncAt };
 }
@@ -555,23 +602,21 @@ export function onSyncChange(fn: (info: { state: SyncState; lastSyncAt: number |
   return () => { syncListeners.delete(fn); };
 }
 
-// Shorter debounce — 1.5s feels almost instant for the user but still
-// groups bursts of rapid edits (e.g. tapping +2.5 a couple of times in a
-// row) into a single Drive upload.
-const SYNC_DEBOUNCE_MS = 1500;
-
 export function markDirty() {
   dirty = true;
+  // Persist the bit so the next session can self-heal even if the page
+  // dies before the upload finishes (mobile lifecycle, iOS Safari, etc).
+  setPending(true);
   if (syncState !== 'syncing') setSyncState('dirty');
-  if (flushTimer) return;
-  flushTimer = setTimeout(() => flushToDrive().catch(() => {}), SYNC_DEBOUNCE_MS);
+  // Push immediately. The in-flight + still-dirty re-fire pattern below
+  // coalesces bursts so we don't actually upload on every keystroke.
+  void flushToDrive().catch(() => {});
 }
 
 async function flushToDrive(): Promise<void> {
-  if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
-  if (!dirty || !db) return;
+  if (!db || !dirty) return;
   if (inFlight) return inFlight;
-  if (!isSignedIn()) { dirty = false; return; }
+  if (!isSignedIn()) { dirty = false; setPending(false); return; }
   dirty = false;
   setSyncState('syncing');
   inFlight = (async () => {
@@ -579,19 +624,29 @@ async function flushToDrive(): Promise<void> {
       const bytes = serialize(db!);
       await opfsWrite(bytes);
       await pushBlobToDrive(bytes);
-      // Record the new remote state so future pull-checks know this is "ours".
       const meta = await getRemoteMeta().catch(() => null);
       if (meta) writeStoredMeta(meta);
       setLastSyncAt(Date.now());
+      // Only clear the pending bit if no new mutation came in mid-flight.
+      if (!dirty) setPending(false);
       setSyncState(dirty ? 'dirty' : 'idle');
     } catch (e) {
-      dirty = true;
+      dirty = true;             // keep the dirty bit so we retry later
       setSyncState('error');
       throw e;
     } finally {
       inFlight = null;
     }
   })();
+  // After this push lands, if more mutations sneaked in, run another.
+  inFlight
+    .then(() => {
+      if (dirty && !inFlight) {
+        // tiny delay so React state updates can batch
+        setTimeout(() => { void flushToDrive().catch(() => {}); }, 50);
+      }
+    })
+    .catch(() => {/* error path handles its own retry via online/visibility */});
   return inFlight;
 }
 
@@ -642,41 +697,61 @@ export function exportBytes(): Uint8Array {
 /** Force a flush right now (e.g. from a "Sincronizar" button in Settings).
  *  Resolves when the upload completes. */
 export async function flushNow(): Promise<void> {
-  if (!dirty) return;
+  if (!dirty && !isPending()) return;
+  // If pending but dirty=false (app loaded with stale flag from previous
+  // session), set dirty so flushToDrive actually runs.
+  if (isPending()) dirty = true;
   return flushToDrive();
 }
 
 /** User-triggered "sincroniza ya" — pushes pending edits and then pulls
  *  any remote updates from another device. Always does both legs so the
- *  pill click always reconciles, even when nothing is dirty locally.
- *  Returns once both halves complete. */
+ *  pill click always reconciles, even when nothing is dirty locally. */
 export async function forceSync(): Promise<void> {
-  // Cancel any debounce so flushToDrive doesn't double-fire.
-  if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
-  if (dirty) {
-    try { await flushToDrive(); } catch (e) { console.error('[forceSync] push', e); }
+  if (dirty || isPending()) {
+    try { await flushNow(); } catch (e) { console.error('[forceSync] push', e); }
   }
   try { await pullRemoteIfNewer(); } catch (e) { console.error('[forceSync] pull', e); }
 }
 
 if (typeof window !== 'undefined') {
-  const flushNow = () => { if (dirty) flushToDrive().catch(() => {}); };
-  window.addEventListener('pagehide', flushNow);
+  const drainPending = () => {
+    if (!isPending() || inFlight) return;
+    dirty = true;
+    void flushToDrive().catch(() => {});
+  };
+
+  // Page is being torn down — last chance to push. Async fetch may not
+  // complete on mobile but we still try, and the pending flag survives in
+  // localStorage so the next session self-heals.
+  window.addEventListener('pagehide', () => {
+    if (dirty || isPending()) {
+      void flushToDrive().catch(() => {});
+    }
+  });
+
   window.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') {
-      flushNow();
+      if (dirty) void flushToDrive().catch(() => {});
     } else if (document.visibilityState === 'visible') {
-      // Someone else (likely the phone) may have pushed updates while this
-      // tab was idle. Pull them in.
+      // Came back from background. First, finish any pending upload from
+      // this device. Then check whether another device (the phone, the
+      // desktop) pushed something while we were away.
+      drainPending();
       checkForRemoteUpdates().catch(() => {});
     }
   });
-  // Also poll every 2 minutes while the tab is foregrounded to catch updates
-  // from other devices in near-real-time.
+
+  // Network came back — drain pending immediately rather than waiting for
+  // the next visibility event.
+  window.addEventListener('online', drainPending);
+
+  // Background poll: every 2 minutes while foreground, check remote AND
+  // try to drain pending in case a previous push silently failed.
   setInterval(() => {
-    if (document.visibilityState === 'visible') {
-      checkForRemoteUpdates().catch(() => {});
-    }
+    if (document.visibilityState !== 'visible') return;
+    drainPending();
+    checkForRemoteUpdates().catch(() => {});
   }, 120_000);
 }
 
@@ -689,6 +764,8 @@ export async function wipeAll(): Promise<void> {
   await opfsDelete();
   writeStoredMeta(null);
   setLastSyncAt(null);
+  setPending(false);
+  dirty = false;
   setSyncState('idle');
   setStatus('idle');
 }
@@ -697,5 +774,10 @@ export async function wipeAll(): Promise<void> {
 export async function resetLocal(): Promise<void> {
   if (db) { db.close(); db = null; }
   await opfsDelete();
+  writeStoredMeta(null);
+  setLastSyncAt(null);
+  setPending(false);
+  dirty = false;
+  setSyncState('idle');
   setStatus('idle');
 }

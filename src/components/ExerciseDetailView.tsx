@@ -94,14 +94,30 @@ export default function ExerciseDetailView() {
       <div className="card p-4">
         <div className="section-title mb-3">Historial</div>
         <div className="flex flex-col divide-y divide-border">
-          {[...historyByDate.entries()].map(([date, sets]) => (
-            <a key={date} href={`/day?d=${date}`} className="-mx-2 flex items-baseline justify-between gap-3 rounded-md px-2 py-2.5 text-sm transition hover:bg-elevated">
-              <span className="shrink-0 capitalize text-muted">{formatDate(date)}</span>
-              <span className="text-right tabular-nums">
-                {sets.map((s) => `${s.weight_kg}×${s.reps}`).join(' · ')}
-              </span>
-            </a>
-          ))}
+          {[...historyByDate.entries()].map(([date, sets]) => {
+            // Highlight the heaviest set of the day so the user spots it
+            // at a glance. Tie-break by reps so 80×8 wins over 80×6.
+            let topIdx = 0;
+            for (let i = 1; i < sets.length; i++) {
+              const a = sets[i], b = sets[topIdx];
+              if (a.weight_kg > b.weight_kg || (a.weight_kg === b.weight_kg && a.reps > b.reps)) topIdx = i;
+            }
+            return (
+              <a key={date} href={`/day?d=${date}`} className="-mx-2 flex items-baseline justify-between gap-3 rounded-md px-2 py-2.5 text-sm transition hover:bg-elevated">
+                <span className="shrink-0 capitalize text-muted">{formatDate(date)}</span>
+                <span className="text-right tabular-nums">
+                  {sets.map((s, i) => (
+                    <span key={s.id}>
+                      {i > 0 && <span className="text-muted"> · </span>}
+                      <span className={i === topIdx ? 'font-semibold text-accent' : ''}>
+                        {s.weight_kg}×{s.reps}
+                      </span>
+                    </span>
+                  ))}
+                </span>
+              </a>
+            );
+          })}
         </div>
       </div>
     </>
