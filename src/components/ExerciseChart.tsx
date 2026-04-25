@@ -79,9 +79,6 @@ export default function ExerciseChart({ data }: { data: SessionPoint[] }) {
   const [metric, setMetric] = useState<Metric>('est_1rm');
   const [range, setRange] = useState<RangeId>('1Y');
   const [colors, setColors] = useState(readCssColors);
-  // Index of the data point currently under the user's finger / cursor.
-  // Powers the "scrubbing" banner above the chart.
-  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
 
   useEffect(() => {
     setColors(readCssColors());
@@ -118,66 +115,52 @@ export default function ExerciseChart({ data }: { data: SessionPoint[] }) {
     return best;
   }, [chartData]);
 
-  // Whatever point the finger/cursor is over — falls back to the latest point
-  // when nothing is hovered, so the banner is never empty.
-  const focusPoint = useMemo(() => {
-    if (chartData.length === 0) return null;
-    if (hoverIdx != null && chartData[hoverIdx]) return chartData[hoverIdx];
-    return chartData[chartData.length - 1];
-  }, [chartData, hoverIdx]);
-
   if (data.length === 0) {
     return <div className="text-sm text-muted">Sin histórico todavía.</div>;
   }
 
-  const handleMove = (state: any) => {
-    const idx = state?.activeTooltipIndex;
-    if (typeof idx === 'number' && idx >= 0) setHoverIdx(idx);
-  };
-  const handleLeave = () => setHoverIdx(null);
-
   return (
     <div>
-      {/* Scrubbing banner — what's under your finger right now. */}
-      {focusPoint && <ScrubBanner point={focusPoint} metric={metric} unit={active.unit} colors={colors} live={hoverIdx != null} />}
-
-      {/* Range chips */}
-      <div className="no-scrollbar mb-2 -mx-1 flex gap-1 overflow-x-auto px-1">
-        {RANGES.map((r) => {
-          const isActive = range === r.id;
-          return (
+      {/* Single control row: range chips on the left, metric chips on the
+          right. The static "último" banner used to live above this row;
+          hover/scrub now drives an in-chart tooltip instead so the header
+          stays clean. */}
+      <div className="no-scrollbar mb-3 -mx-1 flex flex-wrap items-center justify-between gap-2 px-1">
+        <div className="flex gap-1">
+          {RANGES.map((r) => {
+            const isActive = range === r.id;
+            return (
+              <button
+                key={r.id}
+                type="button"
+                onClick={() => setRange(r.id)}
+                className={`shrink-0 rounded-full px-3 py-1 text-[11px] font-semibold transition ${
+                  isActive
+                    ? 'bg-fg/90 text-bg'
+                    : 'border border-border bg-card text-muted hover:text-fg'
+                }`}
+              >
+                {r.label}
+              </button>
+            );
+          })}
+        </div>
+        <div className="flex gap-1.5">
+          {METRICS.map((m) => (
             <button
-              key={r.id}
+              key={m.id}
               type="button"
-              onClick={() => setRange(r.id)}
-              className={`shrink-0 rounded-full px-3 py-1 text-[11px] font-semibold transition ${
-                isActive
-                  ? 'bg-fg/90 text-bg'
-                  : 'border border-border bg-card text-muted hover:text-fg'
+              onClick={() => setMetric(m.id)}
+              className={`rounded-full px-3 py-1 text-[11px] font-medium transition ${
+                metric === m.id
+                  ? 'bg-accent text-ink'
+                  : 'bg-elevated text-muted hover:text-fg'
               }`}
             >
-              {r.label}
+              {m.label}
             </button>
-          );
-        })}
-      </div>
-
-      {/* Metric chips */}
-      <div className="mb-3 flex gap-1.5">
-        {METRICS.map((m) => (
-          <button
-            key={m.id}
-            type="button"
-            onClick={() => setMetric(m.id)}
-            className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${
-              metric === m.id
-                ? 'bg-accent text-ink'
-                : 'bg-elevated text-muted hover:text-fg'
-            }`}
-          >
-            {m.label}
-          </button>
-        ))}
+          ))}
+        </div>
       </div>
 
       {chartData.length === 0 ? (
@@ -194,10 +177,6 @@ export default function ExerciseChart({ data }: { data: SessionPoint[] }) {
             <AreaChart
               data={chartData}
               margin={{ top: 12, right: 12, bottom: 0, left: -16 }}
-              onMouseMove={handleMove}
-              onMouseLeave={handleLeave}
-              onTouchMove={handleMove as any}
-              onTouchEnd={handleLeave}
             >
               <defs>
                 <linearGradient id="fill" x1="0" y1="0" x2="0" y2="1">
@@ -243,7 +222,16 @@ export default function ExerciseChart({ data }: { data: SessionPoint[] }) {
               )}
               <Tooltip
                 cursor={{ stroke: colors.accent, strokeOpacity: 0.6, strokeWidth: 1 }}
-                content={() => null}
+                allowEscapeViewBox={{ x: false, y: true }}
+                offset={12}
+                content={(props: any) => (
+                  <ChartTooltip
+                    active={props.active}
+                    payload={props.payload}
+                    metric={metric}
+                    unit={active.unit}
+                  />
+                )}
               />
               <Area
                 type="monotone"
@@ -262,56 +250,42 @@ export default function ExerciseChart({ data }: { data: SessionPoint[] }) {
   );
 }
 
-function ScrubBanner({
-  point,
+/** Floating tooltip shown right above the cursor while scrubbing the chart.
+ *  Recharts feeds us the active datum via `payload`. We render the date,
+ *  the metric value, and the underlying set (e.g. "70 kg × 9 reps"). */
+function ChartTooltip({
+  active,
+  payload,
   metric,
   unit,
-  colors,
-  live,
 }: {
-  point: {
-    date: string;
-    value: number;
-    top_set_weight: number;
-    top_set_reps: number;
-    rm_set_weight: number;
-    rm_set_reps: number;
-    set_count: number;
-  };
+  active?: boolean;
+  payload?: Array<{ payload: any }>;
   metric: Metric;
   unit: string;
-  colors: { fg: string; muted: string };
-  live: boolean;
 }) {
-  const prettyDate = new Date(point.date + 'T00:00:00')
-    .toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+  if (!active || !payload || !payload.length) return null;
+  const p = payload[0].payload;
+  const prettyDate = new Date(p.date + 'T00:00:00')
+    .toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' });
 
   let detail: string;
   if (metric === 'est_1rm') {
-    detail = `${formatKg(point.rm_set_weight)} kg × ${point.rm_set_reps} reps`;
+    detail = `${formatKg(p.rm_set_weight)} kg × ${p.rm_set_reps} reps`;
   } else if (metric === 'top_weight') {
-    detail = `${formatKg(point.top_set_weight)} kg × ${point.top_set_reps} reps`;
+    detail = `${formatKg(p.top_set_weight)} kg × ${p.top_set_reps} reps`;
   } else {
-    detail = `${point.set_count} ${point.set_count === 1 ? 'serie' : 'series'} en el día`;
+    detail = `${p.set_count} ${p.set_count === 1 ? 'serie' : 'series'}`;
   }
 
   return (
-    <div className="mb-2 flex items-center justify-between rounded-xl border border-border bg-card/60 px-3 py-2">
-      <div className="min-w-0">
-        <div
-          className="text-[10px] font-medium uppercase tracking-wider"
-          style={{ color: colors.muted }}
-        >
-          {prettyDate}{live ? '' : ' · último'}
-        </div>
-        <div className="mt-0.5 truncate text-xs text-muted">{detail}</div>
+    <div className="pointer-events-none rounded-lg border border-border bg-card/95 px-2.5 py-1.5 text-[11px] shadow-md">
+      <div className="font-medium capitalize text-fg">{prettyDate}</div>
+      <div className="mt-0.5 tabular-nums">
+        <span className="text-base font-semibold tracking-tight">{formatKg(p.value)}</span>
+        <span className="ml-0.5 text-[10px] text-muted">{unit}</span>
       </div>
-      <div className="text-right">
-        <span className="text-xl font-semibold tabular-nums tracking-tight">
-          {formatKg(point.value)}
-        </span>
-        <span className="ml-1 text-xs text-muted">{unit}</span>
-      </div>
+      <div className="text-[10px] tabular-nums text-muted">{detail}</div>
     </div>
   );
 }
