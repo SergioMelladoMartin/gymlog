@@ -14,7 +14,7 @@ import sqlite3InitModule, {
   type Sqlite3Static,
 } from '@sqlite.org/sqlite-wasm';
 import { deleteBlobFromDrive, pullBlobFromDrive, pushBlobToDrive, getRemoteMeta } from './drive';
-import { isSignedIn } from './auth';
+import { getAccessToken, isSignedIn } from './auth';
 
 const OPFS_NAME = '/gymlog.fitnotes';
 const LS_REMOTE_META = 'gymlog-drive-meta';
@@ -632,7 +632,13 @@ export function markDirty() {
 async function flushToDrive(): Promise<void> {
   if (!db || !dirty) return;
   if (inFlight) return inFlight;
-  if (!isSignedIn()) { dirty = false; setPending(false); return; }
+  // NOTE: deliberately *not* bailing on `!isSignedIn()`. The Google access
+  // token expires every hour; once it's gone, isSignedIn() returns false
+  // and the flush would silently drop the upload, leaving the user stuck
+  // on a yellow "cambios sin subir" pill forever. Letting the push run
+  // means authHeaders → getAccessToken triggers a silent refresh; if that
+  // fails (e.g. third-party cookies blocked on iOS) the error surfaces
+  // as the red pill and the user can tap it to re-auth interactively.
   dirty = false;
   setSyncState('syncing');
   inFlight = (async () => {
@@ -724,10 +730,27 @@ export async function flushNow(): Promise<void> {
 
 /** User-triggered "sincroniza ya" — pushes pending edits and then pulls
  *  any remote updates from another device. Always does both legs so the
- *  pill click always reconciles, even when nothing is dirty locally. */
+ *  pill click always reconciles, even when nothing is dirty locally. If
+ *  the silent token refresh has been failing (iOS Safari, blocked
+ *  third-party cookies), this is also our chance to prompt the user
+ *  interactively from inside their gesture. */
 export async function forceSync(): Promise<void> {
   if (dirty || isPending()) {
-    try { await flushNow(); } catch (e) { console.error('[forceSync] push', e); }
+    try {
+      await flushNow();
+    } catch (e) {
+      console.error('[forceSync] push failed, trying interactive re-auth', e);
+      try {
+        await getAccessToken(true); // popup, runs inside the click gesture
+        // Re-arm dirty so flushToDrive actually runs and try again.
+        if (isPending()) {
+          dirty = true;
+          await flushToDrive();
+        }
+      } catch (e2) {
+        console.error('[forceSync] interactive re-auth failed', e2);
+      }
+    }
   }
   try { await pullRemoteIfNewer(); } catch (e) { console.error('[forceSync] pull', e); }
 }

@@ -122,14 +122,20 @@ export function isSignedIn(): boolean {
 /**
  * Returns a valid access token, re-prompting the user silently if the
  * cached one is expired. Throws if no token can be obtained.
+ *
+ * Wrapped in a 12 s timeout: silent refresh on iOS / strict-cookie
+ * browsers occasionally never resolves (no callback, no error). Without
+ * the timeout the whole sync pipeline would hang on its caller.
  */
+const TOKEN_TIMEOUT_MS = 12_000;
+
 export async function getAccessToken(interactive = false): Promise<string> {
   const cached = readCachedToken();
   if (cached) return cached.token;
 
   await loadGis();
 
-  return new Promise<string>((resolve, reject) => {
+  const tokenPromise = new Promise<string>((resolve, reject) => {
     const client = window.google!.accounts.oauth2.initTokenClient({
       client_id: getClientId(),
       scope: `${DRIVE_SCOPE} ${PROFILE_SCOPES}`,
@@ -168,6 +174,16 @@ export async function getAccessToken(interactive = false): Promise<string> {
     // the user re-tick the Drive checkbox). Empty = silent re-auth.
     client.requestAccessToken({ prompt: interactive ? 'consent' : '' });
   });
+
+  return Promise.race([
+    tokenPromise,
+    new Promise<string>((_, reject) =>
+      setTimeout(
+        () => reject(new Error('Tiempo agotado pidiendo token a Google. ¿Cookies bloqueadas? Toca el indicador de sync para reintentar de forma interactiva.')),
+        TOKEN_TIMEOUT_MS,
+      ),
+    ),
+  ]);
 }
 
 /** Force a re-consent flow (used after a 403 from Drive). */
