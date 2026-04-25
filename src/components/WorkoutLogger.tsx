@@ -403,13 +403,14 @@ function QuickAdd({
     submittingRef.current = true;
     onAdd(exerciseId, w, r);
     // Keep BOTH weight and reps from the just-saved set — most users go for
-    // the same load + reps combo for several sets in a row. The submitting
-    // ref already guards against double-tap double-saves, so leaving reps
-    // populated is safe.
+    // the same load + reps combo for several sets in a row.
     setDraft({ weight: String(w), reps: String(r) });
     setJustAdded(true);
     setTimeout(() => { setJustAdded(false); submittingRef.current = false; }, 400);
-    weightRef.current?.focus();
+    // NOTE: deliberately *not* calling weightRef.current?.focus(). Moving
+    // focus from reps (numeric kb) to weight (decimal kb) made the mobile
+    // keyboard collapse and re-open on every save. We keep focus where the
+    // user already had it.
   }
 
   function bumpWeight(delta: number) {
@@ -451,6 +452,11 @@ function QuickAdd({
       />
       <button
         type="submit"
+        // tabIndex+mousedown preventDefault keeps the focused input from
+        // blurring when this button is tapped, so the mobile keyboard
+        // doesn't flicker close-then-open on every save.
+        tabIndex={-1}
+        onMouseDown={(e) => e.preventDefault()}
         className="grid h-[52px] w-[52px] shrink-0 place-items-center rounded-xl bg-accent text-ink transition hover:brightness-110 active:scale-95 disabled:opacity-40"
         disabled={!draft.weight || !draft.reps}
         aria-label={justAdded ? 'Añadido' : 'Añadir set'}
@@ -497,6 +503,10 @@ function StepperField({
         <button
           type="button"
           onClick={onDecrement}
+          // Stay non-focusable + cancel the synthetic focus shift so the
+          // input keeps focus and the mobile keyboard doesn't blink.
+          tabIndex={-1}
+          onMouseDown={(e) => e.preventDefault()}
           aria-label={decrementLabel}
           className="grid w-10 shrink-0 place-items-center border-r border-border text-muted transition hover:text-fg active:bg-border/40"
         >
@@ -514,6 +524,8 @@ function StepperField({
         <button
           type="button"
           onClick={onIncrement}
+          tabIndex={-1}
+          onMouseDown={(e) => e.preventDefault()}
           aria-label={incrementLabel}
           className="grid w-10 shrink-0 place-items-center border-l border-border text-muted transition hover:text-fg active:bg-border/40"
         >
@@ -1012,7 +1024,7 @@ function QuickAddCardio({
     setDistance('');
     setJustAdded(true);
     setTimeout(() => { setJustAdded(false); submittingRef.current = false; }, 400);
-    durationRef.current?.focus();
+    // No explicit focus shift — keep the mobile keyboard stable.
   }
 
   return (
@@ -1043,6 +1055,8 @@ function QuickAddCardio({
       </label>
       <button
         type="submit"
+        tabIndex={-1}
+        onMouseDown={(e) => e.preventDefault()}
         className="grid h-[52px] w-[52px] shrink-0 place-items-center rounded-xl bg-accent text-ink transition hover:brightness-110 active:scale-95 disabled:opacity-40"
         disabled={!duration.trim()}
         aria-label={justAdded ? 'Añadido' : 'Añadir serie'}
