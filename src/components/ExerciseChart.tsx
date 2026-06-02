@@ -180,9 +180,13 @@ export default function ExerciseChart({ data }: { data: SessionPoint[] }) {
             >
               <defs>
                 <linearGradient id="fill" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={colors.accent} stopOpacity={0.45} />
+                  <stop offset="0%" stopColor={colors.accent} stopOpacity={0.55} />
+                  <stop offset="45%" stopColor={colors.accent} stopOpacity={0.18} />
                   <stop offset="100%" stopColor={colors.accent} stopOpacity={0} />
                 </linearGradient>
+                <filter id="lineGlow" x="-20%" y="-40%" width="140%" height="180%">
+                  <feDropShadow dx="0" dy="0" stdDeviation="3" floodColor={colors.accent} floodOpacity="0.45" />
+                </filter>
               </defs>
               <CartesianGrid stroke={colors.grid} strokeDasharray="3 3" />
               <XAxis
@@ -237,9 +241,11 @@ export default function ExerciseChart({ data }: { data: SessionPoint[] }) {
                 type="monotone"
                 dataKey="value"
                 stroke={colors.accent}
-                strokeWidth={2}
+                strokeWidth={2.5}
+                strokeLinecap="round"
                 fill="url(#fill)"
                 isAnimationActive={false}
+                style={{ filter: 'url(#lineGlow)' }}
                 activeDot={{ r: 5, stroke: colors.bg, strokeWidth: 2, fill: colors.accent }}
               />
             </AreaChart>

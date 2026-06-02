@@ -1,6 +1,6 @@
 ---
 import '../styles/global.css';
-import { ClientRouter } from 'astro:transitions';
+import { ClientRouter, fade } from 'astro:transitions';
 import SideNav from '../components/SideNav';
 import SyncStatus from '../components/SyncStatus';
 import Onboarding from '../components/Onboarding';
@@ -126,7 +126,7 @@ const navTitle = {
       </div>
     </header>
 
-    <main class="mx-auto max-w-3xl px-4 py-6">
+    <main class="mx-auto max-w-3xl px-4 py-6" transition:animate={fade({ duration: '0.2s' })}>
       <slot />
     </main>
     {activeNav !== 'login' && <Onboarding client:only="react" />}

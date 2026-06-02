@@ -206,7 +206,7 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
   return (
     <div className="flex flex-col gap-5">
       {prTotals.any > 0 && (
-        <div className="relative overflow-hidden rounded-2xl border border-accent/40 bg-accent-soft px-4 py-3">
+        <div className="pr-shine relative overflow-hidden rounded-2xl border border-accent/40 bg-accent-soft px-4 py-3">
           <div className="flex items-center gap-3">
             <span className="grid h-8 w-8 place-items-center rounded-full bg-accent text-ink">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M7.5 2h9l1.5 3h3.5l-2.5 5a6 6 0 0 1-4.4 3.85L14 18h2v2H8v-2h2l-.6-4.15A6 6 0 0 1 5 10L2.5 5H6zm0 2-.47.94L8.4 8.67A4 4 0 0 0 12 11a4 4 0 0 0 3.6-2.33L17.47 4.94 17 4z"/></svg>
@@ -255,9 +255,13 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
                 className="card relative overflow-hidden"
                 style={{ boxShadow: `inset 3px 0 0 ${catColor}` }}
               >
-                <header className="flex items-center justify-between gap-2 px-4 py-3">
-                  <a href={`/exercise?id=${exerciseId}`} className="min-w-0 flex-1 truncate font-semibold tracking-tight hover:underline">
-                    {ex?.name ?? `#${exerciseId}`}
+                <header
+                  className="flex items-center justify-between gap-2 px-4 py-3"
+                  style={{ background: `linear-gradient(90deg, color-mix(in srgb, ${catColor} 10%, transparent), transparent 60%)` }}
+                >
+                  <a href={`/exercise?id=${exerciseId}`} className="flex min-w-0 flex-1 items-center gap-2 font-semibold tracking-tight hover:underline">
+                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: catColor, boxShadow: `0 0 6px ${catColor}` }} />
+                    <span className="truncate">{ex?.name ?? `#${exerciseId}`}</span>
                   </a>
                   <span className="hidden shrink-0 text-xs tabular-nums text-muted sm:inline">
                     {exSets.length === 0
@@ -1163,7 +1167,7 @@ function PrBadges({ set }: { set: TrainingSet }) {
           key={b.label}
           title={b.title}
           aria-label={b.title}
-          className={`grid h-5 w-5 place-items-center rounded-full ${b.cls}`}
+          className={`pr-pop grid h-5 w-5 place-items-center rounded-full ${b.cls}`}
         >
           {b.icon}
         </span>
