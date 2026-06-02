@@ -245,3 +245,35 @@
 @media (prefers-reduced-motion: reduce) {
   #nav-progress { transition: opacity 120ms !important; }
 }
+
+/* Content-area loading spinner during ClientRouter navigation.
+   The page's view is a `client:only` island, so between the DOM swap and
+   React mounting there's a blank gap with no feedback. While that island is
+   still empty we render a centred spinner via ::after. Scoped to <main> so
+   the persistent sidebar / sync-status islands never trigger it. The 150ms
+   delayed fade-in means instant mounts don't flash a spinner. Once React
+   fills the island it is no longer :empty, so these rules stop applying. */
+main astro-island:empty {
+  display: block;
+  position: relative;
+  min-height: 60vh;
+}
+main astro-island:empty::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 32px;
+  height: 32px;
+  margin: -16px 0 0 -16px;
+  border-radius: 9999px;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-accent);
+  opacity: 0;
+  animation: nav-spin 0.7s linear infinite, nav-spinner-in 0.2s ease 0.15s forwards;
+}
+@keyframes nav-spin { to { transform: rotate(360deg); } }
+@keyframes nav-spinner-in { to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  main astro-island:empty::after { animation: nav-spinner-in 0.2s ease 0.15s forwards; }
+}
