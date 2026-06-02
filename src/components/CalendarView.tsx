@@ -191,7 +191,7 @@ export default function CalendarView() {
                         className={`absolute rounded-sm transition hover:scale-125 ${isToday ? 'ring-1 ring-fg' : ''}`}
                         style={{ left: `${hc.col * 14}px`, top: `${hc.dow * 14}px`, width: '11px', height: '11px', background: bg }}
                       >
-                        {hc.hasPr && <span className="absolute left-1/2 top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full ring-1 ring-bg" style={{ background: '#facc15' }} />}
+                        {hc.hasPr && <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full ring-1 ring-bg" style={{ background: 'color-mix(in srgb, var(--color-accent) 55%, #000)' }} />}
                       </a>
                     );
                   })}

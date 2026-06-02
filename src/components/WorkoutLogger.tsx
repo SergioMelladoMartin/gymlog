@@ -1152,7 +1152,7 @@ function PrBadges({ set }: { set: TrainingSet }) {
   // Copa (trophy) — more reps than ever at this weight or heavier.
   if (set.pr_reps) badges.push({
     label: 'R', title: 'Récord de repeticiones',
-    cls: 'bg-[#facc15] text-black',
+    cls: 'bg-accent text-ink',
     icon: <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M7.5 2h9l1.5 3h3.5l-2.5 5a6 6 0 0 1-4.4 3.85L14 18h2v2H8v-2h2l-.6-4.15A6 6 0 0 1 5 10L2.5 5H6z"/></svg>,
   });
   if (!badges.length) return null;
