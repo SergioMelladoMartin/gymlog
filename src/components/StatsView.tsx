@@ -1,8 +1,21 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { useDatabase } from '../hooks/useDatabase';
 import { getDb } from '../lib/sqlite';
 
+const StatsTrendChart = lazy(() => import('./StatsTrendChart'));
+
 type Range = 'all' | '7d' | '30d' | '90d' | '365d' | 'year';
+type GroupBy = 'week' | 'month';
+type TrendMetric = 'workouts' | 'volume' | 'sets' | 'reps';
+
+interface TrendRow { period: string; days: number; sets: number; reps: number; volume: number }
+
+const TREND_METRICS: Array<{ id: TrendMetric; label: string; field: keyof Omit<TrendRow, 'period'>; unit?: string }> = [
+  { id: 'workouts', label: 'Entrenos', field: 'days' },
+  { id: 'volume',   label: 'Volumen',  field: 'volume', unit: 'kg' },
+  { id: 'sets',     label: 'Series',   field: 'sets' },
+  { id: 'reps',     label: 'Reps',     field: 'reps' },
+];
 
 function argbToHex(n: number | null): string | null {
   if (n == null) return null;
@@ -21,6 +34,12 @@ export default function StatsView() {
   const [top, setTop] = useState<Array<{ id: number; name: string; color: string | null; set_count: number }>>([]);
   const [weekday, setWeekday] = useState<number[]>([0, 0, 0, 0, 0, 0, 0]);
   const [label, setLabel] = useState('Todo el histórico');
+
+  // Trend card has its own controls (independent of the range chips): it
+  // always shows the most recent 12 weeks or months.
+  const [groupBy, setGroupBy] = useState<GroupBy>('week');
+  const [trendMetric, setTrendMetric] = useState<TrendMetric>('workouts');
+  const [trend, setTrend] = useState<TrendRow[]>([]);
 
   useEffect(() => {
     if (!ready) return;
@@ -98,6 +117,41 @@ export default function StatsView() {
     setWeekday([1, 2, 3, 4, 5, 6, 0].map((d) => wm.get(d) ?? 0));
   }, [ready, range, year]);
 
+  // ── Trend over time (last 12 weeks / months) ───────────────────────────
+  useEffect(() => {
+    if (!ready) return;
+    const db = getDb();
+    const q = (sql: string) =>
+      db.exec({ sql, rowMode: 'object', returnValue: 'resultRows' }) as any[];
+
+    // Week → the Monday that starts each week; Month → 'YYYY-MM'. Aggregate
+    // every metric per period in one pass; the UI picks which to plot.
+    const periodExpr = groupBy === 'week'
+      ? "date(date, '-' || ((strftime('%w', date) + 6) % 7) || ' days')"
+      : "strftime('%Y-%m', date)";
+    const rowsT = q(
+      `SELECT ${periodExpr} AS period,
+              COUNT(DISTINCT date) AS days,
+              COUNT(*)             AS sets,
+              SUM(reps)            AS reps,
+              SUM(metric_weight * reps) AS volume
+       FROM training_log
+       GROUP BY period
+       ORDER BY period DESC
+       LIMIT 12`,
+    );
+    // Reverse to chronological order for the chart.
+    setTrend(
+      rowsT.reverse().map((r: any) => ({
+        period: String(r.period),
+        days: Number(r.days ?? 0),
+        sets: Number(r.sets ?? 0),
+        reps: Number(r.reps ?? 0),
+        volume: Number(r.volume ?? 0),
+      })),
+    );
+  }, [ready, groupBy]);
+
   if (!ready) return <div className="flex min-h-[50vh] items-center justify-center text-muted"><div className="h-8 w-8 animate-spin rounded-full border-2 border-border border-t-accent" /></div>;
 
   const maxVolume = perCat.reduce((a, c) => Math.max(a, c.volume), 0);
@@ -112,6 +166,14 @@ export default function StatsView() {
     { id: 'year', label: 'YTD', href: `/stats?range=year&year=${currentYear}`, match: range === 'year' && year === currentYear },
     { id: 'all', label: 'Todo', href: '/stats', match: range === 'all' },
   ];
+
+  const activeTrend = TREND_METRICS.find((m) => m.id === trendMetric)!;
+  const trendData = trend.map((r) => ({
+    label: groupBy === 'week'
+      ? new Date(r.period + 'T00:00:00').toLocaleDateString('es-ES', { day: 'numeric', month: 'short' }).replace('.', '')
+      : new Date(r.period + '-01T00:00:00').toLocaleDateString('es-ES', { month: 'short', year: '2-digit' }).replace('.', ''),
+    value: Number(r[activeTrend.field]),
+  }));
 
   return (
     <>
@@ -132,6 +194,44 @@ export default function StatsView() {
         <Tile label="Sets" value={fmt(totals.total_sets)} />
         <Tile label="Ejercicios" value={String(totals.total_exercises)} />
         <Tile label="Volumen" value={`${Math.round(totals.total_volume / 1000)}k`} unit="kg" />
+      </div>
+
+      {/* Trend over time — own controls (week/month + metric), last 12 periods */}
+      <div className="card mb-5 p-4">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="section-title">
+            Tendencia · {groupBy === 'week' ? 'últimas 12 semanas' : 'últimos 12 meses'}
+          </div>
+          <div className="flex gap-1 rounded-full border border-border bg-card p-0.5 text-[11px] font-medium">
+            {(['week', 'month'] as const).map((g) => (
+              <button
+                key={g}
+                type="button"
+                onClick={() => setGroupBy(g)}
+                className={`rounded-full px-3 py-1 transition ${groupBy === g ? 'bg-accent text-ink' : 'text-muted hover:text-fg'}`}
+              >
+                {g === 'week' ? 'Semana' : 'Mes'}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="no-scrollbar mb-3 -mx-1 flex gap-1.5 overflow-x-auto px-1">
+          {TREND_METRICS.map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              onClick={() => setTrendMetric(m.id)}
+              className={`shrink-0 rounded-full px-3 py-1 text-[11px] font-medium transition ${trendMetric === m.id ? 'bg-elevated text-fg ring-1 ring-accent/50' : 'bg-elevated/40 text-muted hover:text-fg'}`}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+
+        <Suspense fallback={<div className="grid h-56 place-items-center"><div className="h-7 w-7 animate-spin rounded-full border-2 border-border border-t-accent" /></div>}>
+          <StatsTrendChart data={trendData} unit={activeTrend.unit} />
+        </Suspense>
       </div>
 
       <div className="card mb-5 p-4">
