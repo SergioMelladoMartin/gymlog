@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { useDatabase } from '../hooks/useDatabase';
 import {
   getCategories,
@@ -10,8 +10,13 @@ import {
   type TrainingSetEx,
 } from '../lib/queries';
 import type { Category } from '../lib/types';
-import ExerciseChart from './ExerciseChart';
 import ExerciseHeaderEditor from './ExerciseHeaderEditor';
+
+// recharts is ~250 KB — by far the heaviest dependency in the app. Loading it
+// lazily lets the rest of this screen (header, stat tiles, full set history)
+// render instantly; the chart streams in a moment later with a skeleton in
+// its place instead of blocking the whole page mount.
+const ExerciseChart = lazy(() => import('./ExerciseChart'));
 
 function formatDate(iso: string) {
   return new Date(iso + 'T00:00:00').toLocaleDateString('es-ES', {
@@ -88,7 +93,9 @@ export default function ExerciseDetailView() {
 
       <div className="card mb-5 p-4">
         <div className="section-title mb-3">Progresión</div>
-        <ExerciseChart data={sessions} />
+        <Suspense fallback={<div className="grid h-[220px] place-items-center"><div className="h-7 w-7 animate-spin rounded-full border-2 border-border border-t-accent" /></div>}>
+          <ExerciseChart data={sessions} />
+        </Suspense>
       </div>
 
       <div className="card p-4">

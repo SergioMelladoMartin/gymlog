@@ -206,3 +206,39 @@
 @media (prefers-reduced-motion: reduce) {
   .row-in { animation: none; }
 }
+
+/* Top progress bar shown during client-side (ClientRouter) navigation.
+   Driven by the inline script in Layout.astro listening to astro:* events.
+   Gives immediate feedback on every screen change — the new view's island
+   is `client:only`, so without this the content area is blank until React
+   mounts and the navigation feels unresponsive. */
+#nav-progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 60;
+  height: 2px;
+  width: 100%;
+  transform: scaleX(0);
+  transform-origin: 0 50%;
+  background: var(--color-accent);
+  box-shadow: 0 0 8px var(--color-accent);
+  opacity: 0;
+  pointer-events: none;
+  will-change: transform, opacity;
+}
+/* Climb toward ~90% while the next page is being fetched/prepared. */
+#nav-progress.loading {
+  opacity: 1;
+  transform: scaleX(0.9);
+  transition: transform 1.4s cubic-bezier(0.1, 0.7, 0.1, 1), opacity 120ms;
+}
+/* Snap to 100% then fade out once the page is ready. */
+#nav-progress.done {
+  opacity: 0;
+  transform: scaleX(1);
+  transition: transform 160ms ease-out, opacity 240ms ease-out 120ms;
+}
+@media (prefers-reduced-motion: reduce) {
+  #nav-progress { transition: opacity 120ms !important; }
+}

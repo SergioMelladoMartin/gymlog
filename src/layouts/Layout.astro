@@ -58,6 +58,33 @@ const navTitle = {
     </script>
   </head>
   <body class="min-h-dvh" data-sidenav={activeNav !== 'login' ? '' : undefined}>
+    <div id="nav-progress" aria-hidden="true" transition:persist="nav-progress"></div>
+    <script is:inline>
+      // Drive the top navigation progress bar from ClientRouter lifecycle
+      // events. Bound once on first load — ClientRouter keeps the same
+      // document across navigations, so these document-level listeners
+      // persist (this script is NOT marked data-astro-rerun on purpose).
+      (function () {
+        var bar = document.getElementById('nav-progress');
+        if (!bar || bar.dataset.bound) return;
+        bar.dataset.bound = '1';
+        var hideTimer;
+        function start() {
+          clearTimeout(hideTimer);
+          bar.classList.remove('done');
+          // force reflow so the transition restarts from 0 each navigation
+          void bar.offsetWidth;
+          bar.classList.add('loading');
+        }
+        function done() {
+          bar.classList.remove('loading');
+          bar.classList.add('done');
+          hideTimer = setTimeout(function () { bar.classList.remove('done'); }, 400);
+        }
+        document.addEventListener('astro:before-preparation', start);
+        document.addEventListener('astro:page-load', done);
+      })();
+    </script>
     <script is:inline>
       // Apply the collapsed-sidebar class on body (the head script ran before
       // body existed). Idempotent across Astro client-side navigations.
