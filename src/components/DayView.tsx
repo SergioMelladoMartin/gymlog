@@ -34,7 +34,7 @@ export default function DayView() {
   const { totalVol, uniqueEx, hasPr } = useMemo(() => {
     const vol = sets.reduce((acc, s: any) => acc + s.weight_kg * s.reps, 0);
     const ex = new Set(sets.map((s) => s.exercise_id)).size;
-    const pr = sets.some((s: any) => s.pr_weight || s.pr_1rm || s.pr_reps);
+    const pr = sets.some((s: any) => s.pr_weight || s.pr_reps);
     return { totalVol: vol, uniqueEx: ex, hasPr: pr };
   }, [sets]);
 

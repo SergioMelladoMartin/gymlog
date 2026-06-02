@@ -40,7 +40,7 @@ export default function DiaryView() {
   const [days, setDays] = useState<DayRow[]>([]);
   const [breakdown, setBreakdown] = useState<Map<string, BreakdownRow[]>>(new Map());
   const [comments, setComments] = useState<Map<string, string>>(new Map());
-  const [prs, setPrs] = useState<Map<string, { pr_weight: number; pr_1rm: number; pr_reps: number }>>(new Map());
+  const [prs, setPrs] = useState<Map<string, { pr_weight: number; pr_reps: number }>>(new Map());
   const [hasOlder, setHasOlder] = useState(false);
   const [hasNewer, setHasNewer] = useState(false);
 
@@ -160,7 +160,7 @@ export default function DiaryView() {
             const note = comments.get(d.date);
             const f = formatDate(d.date);
             const pr = prs.get(d.date);
-            const prTotal = (pr?.pr_weight ?? 0) + (pr?.pr_1rm ?? 0) + (pr?.pr_reps ?? 0);
+            const prTotal = (pr?.pr_weight ?? 0) + (pr?.pr_reps ?? 0);
             return (
               <a key={d.date} href={`/day?d=${d.date}`} className="group card flex overflow-hidden transition hover:border-strong">
                 <div className="flex w-20 shrink-0 flex-col items-center justify-center border-r border-border bg-elevated px-3 py-4 text-center">

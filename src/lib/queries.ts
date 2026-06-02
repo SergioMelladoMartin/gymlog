@@ -131,29 +131,34 @@ export function updateExercise(id: number, patch: { name?: string; category_id?:
   markDirty();
 }
 
-// ─── PR detection (current holders) ───────────────────────────────────
-// Shared sub-query producing the single set id that holds each PR type
-// for every exercise. Ties resolved by earliest _id.
-const PR_HOLDERS_CTE = `
-  WITH pr_holders AS (
-    SELECT e._id AS exercise_id,
-      (SELECT _id FROM training_log
-       WHERE exercise_id = e._id
-       ORDER BY metric_weight DESC, _id ASC LIMIT 1) AS pr_w_id,
-      (SELECT _id FROM training_log
-       WHERE exercise_id = e._id
-       ORDER BY (metric_weight * (1.0 + reps / 30.0)) DESC, _id ASC LIMIT 1) AS pr_1rm_id
-    FROM exercise e
-  ),
-  pr_reps_holders AS (
-    SELECT _id, exercise_id
-    FROM (
-      SELECT _id, exercise_id, metric_weight, reps,
-             ROW_NUMBER() OVER (PARTITION BY exercise_id, metric_weight ORDER BY reps DESC, _id ASC) AS rn
-      FROM training_log
-    ) t WHERE rn = 1
-  )
-`;
+// ─── PR detection ("was a PR when it was logged") ─────────────────────
+// A set earns a badge by beating what came BEFORE it chronologically
+// (earlier date, or same date with a lower _id) — not by being the current
+// all-time holder. So the trophy marks the session where you actually
+// progressed, and re-doing/under-doing an old number never re-flags.
+//
+//   • pr_weight (pesa) — heavier than any earlier set → a new max weight.
+//   • pr_reps   (copa) — more reps than any earlier set at this weight OR
+//                        heavier. A lighter set with fewer reps than you've
+//                        already done up high therefore never counts (e.g.
+//                        57kg×9 after 60kg×10 is not a record).
+//
+// `a` is the alias of the outer training_log row these expressions compare.
+const priorPredicate = (a: string) =>
+  `(p.date < ${a}.date OR (p.date = ${a}.date AND p._id < ${a}._id))`;
+
+function prCols(a = 'ts'): string {
+  return `
+    CASE WHEN ${a}.metric_weight > 0 AND ${a}.metric_weight > COALESCE((
+        SELECT MAX(p.metric_weight) FROM training_log p
+        WHERE p.exercise_id = ${a}.exercise_id AND ${priorPredicate(a)}
+      ), -1) THEN 1 ELSE 0 END AS pr_weight,
+    CASE WHEN ${a}.reps > 0 AND ${a}.reps > COALESCE((
+        SELECT MAX(p.reps) FROM training_log p
+        WHERE p.exercise_id = ${a}.exercise_id
+          AND p.metric_weight >= ${a}.metric_weight AND ${priorPredicate(a)}
+      ), -1) THEN 1 ELSE 0 END AS pr_reps`;
+}
 
 // ─── Sets (training_log) ──────────────────────────────────────────────
 
@@ -165,19 +170,14 @@ export interface TrainingSetEx extends TrainingSet {
 
 export function getSetsForDate(date: string): (TrainingSetEx & PrFlags)[] {
   return rows<any>(
-    `${PR_HOLDERS_CTE}
-     SELECT ts._id AS id, ts.exercise_id, e.name AS exercise_name,
+    `SELECT ts._id AS id, ts.exercise_id, e.name AS exercise_name,
             e.category_id, c.colour AS category_colour,
             ts.date, ts.metric_weight AS weight_kg, ts.reps,
             ts.distance AS distance_m, ts.duration_seconds,
-            CASE WHEN ts._id = ph.pr_w_id    THEN 1 ELSE 0 END AS pr_weight,
-            CASE WHEN ts._id = ph.pr_1rm_id  THEN 1 ELSE 0 END AS pr_1rm,
-            CASE WHEN prh._id IS NOT NULL    THEN 1 ELSE 0 END AS pr_reps
+            ${prCols('ts')}
      FROM training_log ts
      JOIN exercise e ON e._id = ts.exercise_id
      JOIN Category c ON c._id = e.category_id
-     JOIN pr_holders ph ON ph.exercise_id = ts.exercise_id
-     LEFT JOIN pr_reps_holders prh ON prh._id = ts._id
      WHERE ts.date = ?
      ORDER BY ts._id ASC`,
     [date],
@@ -195,7 +195,6 @@ export function getSetsForDate(date: string): (TrainingSetEx & PrFlags)[] {
     position: 0,
     created_at: null,
     pr_weight: !!r.pr_weight,
-    pr_1rm: !!r.pr_1rm,
     pr_reps: !!r.pr_reps,
   }));
 }
@@ -207,7 +206,7 @@ export function createSet(payload: {
   reps: number;
   distance_m?: number;
   duration_seconds?: number;
-}): { id: number; pr_weight: boolean; pr_1rm: boolean; pr_reps: boolean } {
+}): { id: number; pr_weight: boolean; pr_reps: boolean } {
   const db = getDb();
   db.exec({
     sql: `INSERT INTO training_log (exercise_id, date, metric_weight, reps, unit, distance, duration_seconds)
@@ -223,32 +222,22 @@ export function createSet(payload: {
   });
   const id = Number(db.selectValue('SELECT last_insert_rowid()'));
 
-  // PR detection for the just-inserted set.
-  const hw = Number(
+  // PR detection for the just-inserted set, against everything logged BEFORE
+  // it (earlier date, or same date + lower _id) — mirrors prCols().
+  const prior = `exercise_id = ? AND (date < ? OR (date = ? AND _id < ?))`;
+  const priorArgs = [payload.exercise_id, payload.date, payload.date, id];
+  const maxWeightBefore = Number(
+    db.selectValue(`SELECT COALESCE(MAX(metric_weight), -1) FROM training_log WHERE ${prior}`, priorArgs),
+  );
+  const maxRepsAtOrAbove = Number(
     db.selectValue(
-      'SELECT COALESCE(MAX(metric_weight), 0) FROM training_log WHERE exercise_id = ? AND _id != ?',
-      [payload.exercise_id, id],
+      `SELECT COALESCE(MAX(reps), -1) FROM training_log WHERE ${prior} AND metric_weight >= ?`,
+      [...priorArgs, payload.weight_kg],
     ),
   );
-  const h1rm = Number(
-    db.selectValue(
-      `SELECT COALESCE(MAX(metric_weight * (1.0 + reps / 30.0)), 0)
-       FROM training_log WHERE exercise_id = ? AND _id != ?`,
-      [payload.exercise_id, id],
-    ),
-  );
-  const hReps = Number(
-    db.selectValue(
-      `SELECT COALESCE(MAX(reps), 0)
-       FROM training_log WHERE exercise_id = ? AND metric_weight = ? AND _id != ?`,
-      [payload.exercise_id, payload.weight_kg, id],
-    ),
-  );
-  const est1rm = payload.weight_kg * (1 + payload.reps / 30);
   const pr = {
-    pr_weight: payload.weight_kg > hw,
-    pr_1rm: est1rm > h1rm,
-    pr_reps: payload.reps > hReps,
+    pr_weight: payload.weight_kg > 0 && payload.weight_kg > maxWeightBefore,
+    pr_reps: payload.reps > 0 && payload.reps > maxRepsAtOrAbove,
   };
 
   markDirty();
@@ -320,29 +309,25 @@ export function getTrainingDaysInRange(from: string, to: string): TrainingDay[] 
   }));
 }
 
-export interface DayPrCounts { pr_weight: number; pr_1rm: number; pr_reps: number }
+export interface DayPrCounts { pr_weight: number; pr_reps: number }
 
 export function getDayPrCounts(dates: string[]): Map<string, DayPrCounts> {
   const map = new Map<string, DayPrCounts>();
   if (!dates.length) return map;
   const placeholders = dates.map(() => '?').join(',');
   const res = rows<any>(
-    `${PR_HOLDERS_CTE}
-     SELECT ts.date,
-            SUM(CASE WHEN ts._id = ph.pr_w_id   THEN 1 ELSE 0 END) AS pr_weight,
-            SUM(CASE WHEN ts._id = ph.pr_1rm_id THEN 1 ELSE 0 END) AS pr_1rm,
-            SUM(CASE WHEN prh._id IS NOT NULL   THEN 1 ELSE 0 END) AS pr_reps
-     FROM training_log ts
-     JOIN pr_holders ph ON ph.exercise_id = ts.exercise_id
-     LEFT JOIN pr_reps_holders prh ON prh._id = ts._id
-     WHERE ts.date IN (${placeholders})
-     GROUP BY ts.date`,
+    `SELECT date, SUM(pr_weight) AS pr_weight, SUM(pr_reps) AS pr_reps
+     FROM (
+       SELECT ts.date, ${prCols('ts')}
+       FROM training_log ts
+       WHERE ts.date IN (${placeholders})
+     )
+     GROUP BY date`,
     dates,
   );
   for (const r of res) {
     map.set(r.date, {
       pr_weight: Number(r.pr_weight) || 0,
-      pr_1rm: Number(r.pr_1rm) || 0,
       pr_reps: Number(r.pr_reps) || 0,
     });
   }

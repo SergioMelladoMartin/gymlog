@@ -20,7 +20,6 @@ function vibrate(pattern: number | number[]) {
 // and the legacy `is_personal_record` for backwards compat with the UI.
 type TrainingSet = TrainingSetEx & {
   pr_weight?: boolean | number;
-  pr_1rm?: boolean | number;
   pr_reps?: boolean | number;
   is_personal_record?: number;
 };
@@ -106,7 +105,7 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
     refreshSets();
     setPendingExerciseIds((prev) => prev.filter((id) => id !== exerciseId));
     // Light tap on save, stronger triple-buzz if we just set a PR.
-    if (result?.pr_weight || result?.pr_1rm || result?.pr_reps) vibrate([20, 40, 20, 40, 40]);
+    if (result?.pr_weight || result?.pr_reps) vibrate([20, 40, 20, 40, 40]);
     else vibrate(10);
   }
 
@@ -196,13 +195,12 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
 
   // PR summary for today
   const prTotals = useMemo(() => {
-    let w = 0, rm = 0, r = 0;
+    let w = 0, r = 0;
     for (const s of sets) {
       if (s.pr_weight) w++;
-      if (s.pr_1rm) rm++;
       if (s.pr_reps) r++;
     }
-    return { w, rm, r, any: w + rm + r };
+    return { w, r, any: w + r };
   }, [sets]);
 
   return (
@@ -217,7 +215,6 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
               <div className="text-sm font-semibold text-fg">{t('workout.newPr')}</div>
               <div className="mt-0.5 flex flex-wrap gap-1.5 text-[11px]">
                 {prTotals.w > 0 && <PrTag label={`${prTotals.w}× ${t('field.weight').replace(' · kg', '').toLowerCase()}`} />}
-                {prTotals.rm > 0 && <PrTag label={`${prTotals.rm}× 1RM`} />}
                 {prTotals.r > 0 && <PrTag label={`${prTotals.r}× ${t('field.reps').toLowerCase()}`} />}
               </div>
             </div>
@@ -1145,21 +1142,20 @@ function CreateExerciseForm({
 }
 
 function PrBadges({ set }: { set: TrainingSet }) {
-  const badges: Array<{ label: string; title: string; icon: React.ReactNode }> = [];
+  const badges: Array<{ label: string; title: string; cls: string; icon: React.ReactNode }> = [];
+  // Pesa (dumbbell) — a new max weight was unlocked.
   if (set.pr_weight) badges.push({
-    label: 'W', title: 'Récord de peso máximo',
-    icon: <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M20.5 9H20V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v3h-.5a1.5 1.5 0 0 0 0 3H4v1a8 8 0 0 0 5 7.42V22a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1v-1.58A8 8 0 0 0 20 13v-1h.5a1.5 1.5 0 0 0 0-3z"/></svg>,
+    label: 'W', title: 'Peso nuevo desbloqueado',
+    cls: 'bg-accent text-ink',
+    icon: <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="m6.5 6.5 11 11"/><path d="m21 21-1-1"/><path d="m3 3 1 1"/><path d="m18 22 4-4"/><path d="m2 6 4-4"/><path d="m3 10 7-7"/><path d="m14 21 7-7"/></svg>,
   });
-  if (set.pr_1rm) badges.push({
-    label: '1RM', title: 'Récord de 1RM estimado',
-    icon: <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>,
-  });
+  // Copa (trophy) — more reps than ever at this weight or heavier.
   if (set.pr_reps) badges.push({
-    label: 'R', title: 'Récord de repeticiones a este peso',
+    label: 'R', title: 'Récord de repeticiones',
+    cls: 'bg-[#facc15] text-black',
     icon: <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M7.5 2h9l1.5 3h3.5l-2.5 5a6 6 0 0 1-4.4 3.85L14 18h2v2H8v-2h2l-.6-4.15A6 6 0 0 1 5 10L2.5 5H6z"/></svg>,
   });
   if (!badges.length) return null;
-  // Icon-only circular badges so three PRs never overflow the row.
   return (
     <span className="ml-1 flex flex-wrap gap-0.5">
       {badges.map((b) => (
@@ -1167,7 +1163,7 @@ function PrBadges({ set }: { set: TrainingSet }) {
           key={b.label}
           title={b.title}
           aria-label={b.title}
-          className="grid h-5 w-5 place-items-center rounded-full bg-accent text-ink"
+          className={`grid h-5 w-5 place-items-center rounded-full ${b.cls}`}
         >
           {b.icon}
         </span>

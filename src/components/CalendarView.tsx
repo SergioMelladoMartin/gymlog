@@ -19,7 +19,7 @@ export default function CalendarView() {
     : [`${year}-${pad(month)}-01`, `${year}-${pad(month)}-${pad(new Date(year, month, 0).getDate())}`];
 
   const [days, setDays] = useState<Awaited<ReturnType<typeof getTrainingDaysInRange>>>([]);
-  const [prs, setPrs] = useState<Map<string, { pr_weight: number; pr_1rm: number; pr_reps: number }>>(new Map());
+  const [prs, setPrs] = useState<Map<string, { pr_weight: number; pr_reps: number }>>(new Map());
 
   useEffect(() => {
     if (!ready) return;
@@ -68,7 +68,7 @@ export default function CalendarView() {
             iso, dow, col,
             trained: !!info,
             sets: info?.set_count ?? 0,
-            hasPr: !!pr && (pr.pr_weight + pr.pr_1rm + pr.pr_reps) > 0,
+            hasPr: !!pr && (pr.pr_weight + pr.pr_reps) > 0,
           });
         }
         cursor.setDate(cursor.getDate() + 1);
@@ -77,7 +77,6 @@ export default function CalendarView() {
     }
   }
   const totalCols = heatCells.length ? Math.max(...heatCells.map((c) => c.col)) + 1 : 0;
-  const intensity = (s: number) => (!s ? 0 : s <= 5 ? 1 : s <= 10 ? 2 : s <= 18 ? 3 : 4);
 
   const monthLabels = view === 'year' ? Array.from({ length: 12 }, (_, i) => {
     const d = new Date(year, i, 1);
@@ -135,7 +134,7 @@ export default function CalendarView() {
               const colors = info?.categories ? info.categories.split(',').filter(Boolean) : [];
               const trained = !!info;
               const pr = prs.get(cell.iso);
-              const hasPr = pr && (pr.pr_weight + pr.pr_1rm + pr.pr_reps) > 0;
+              const hasPr = pr && (pr.pr_weight + pr.pr_reps) > 0;
 
               let cellCls = 'group relative flex aspect-square flex-col items-center justify-center rounded-xl text-sm tabular-nums transition ';
               cellCls += trained
@@ -180,20 +179,19 @@ export default function CalendarView() {
                 </div>
                 <div className="relative" style={{ width: `${totalCols * 14}px`, height: `${7 * 14}px` }}>
                   {heatCells.map((hc) => {
-                    const level = intensity(hc.sets);
                     const isToday = hc.iso === today;
-                    const bg = level === 0 ? 'color-mix(in srgb, var(--color-border) 40%, transparent)'
-                      : level === 1 ? 'color-mix(in srgb, var(--color-accent) 25%, var(--color-card))'
-                      : level === 2 ? 'color-mix(in srgb, var(--color-accent) 50%, var(--color-card))'
-                      : level === 3 ? 'color-mix(in srgb, var(--color-accent) 75%, var(--color-card))'
-                      : 'var(--color-accent)';
+                    // Every trained day is the same solid green — no intensity
+                    // gradient. A record that day gets a yellow dot on top.
+                    const bg = hc.trained
+                      ? 'var(--color-accent)'
+                      : 'color-mix(in srgb, var(--color-border) 40%, transparent)';
                     return (
                       <a key={hc.iso} href={`/day?d=${hc.iso}`}
-                        title={hc.trained ? `${hc.iso} — ${hc.sets} sets${hc.hasPr ? ' · PR' : ''}` : `${hc.iso} — sin entreno`}
+                        title={hc.trained ? `${hc.iso} — ${hc.sets} sets${hc.hasPr ? ' · récord' : ''}` : `${hc.iso} — sin entreno`}
                         className={`absolute rounded-sm transition hover:scale-125 ${isToday ? 'ring-1 ring-fg' : ''}`}
                         style={{ left: `${hc.col * 14}px`, top: `${hc.dow * 14}px`, width: '11px', height: '11px', background: bg }}
                       >
-                        {hc.hasPr && <span className="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-accent ring-1 ring-bg" />}
+                        {hc.hasPr && <span className="absolute left-1/2 top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full ring-1 ring-bg" style={{ background: '#facc15' }} />}
                       </a>
                     );
                   })}

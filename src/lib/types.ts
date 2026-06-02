@@ -51,9 +51,10 @@ export interface GymlogData {
   settings?: Settings;
 }
 
-/** PR flag triple computed on the fly for a given exercise's history. */
+/** PR flags computed on the fly for a given exercise's history.
+ *  - pr_weight (pesa): heavier than any earlier set → a new max weight unlocked.
+ *  - pr_reps   (copa): more reps than any earlier set at this weight or heavier. */
 export interface PrFlags {
   pr_weight: boolean;
-  pr_1rm: boolean;
   pr_reps: boolean;
 }
