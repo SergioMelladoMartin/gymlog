@@ -41,7 +41,7 @@ export default function StatsView() {
   const [trendMetric, setTrendMetric] = useState<TrendMetric>('workouts');
   const [trend, setTrend] = useState<TrendRow[]>([]);
   // Weeks span a wider window than months so the bars cover a useful period.
-  const trendLimit = groupBy === 'week' ? 26 : 12;
+  const trendLimit = groupBy === 'week' ? 54 : 12;
 
   useEffect(() => {
     if (!ready) return;
