@@ -40,16 +40,16 @@ const RANGES: { id: RangeId; label: string }[] = [
 
 function readCssColors() {
   if (typeof window === 'undefined') {
-    return { accent: '#a3e635', grid: '#2a2a34', muted: '#7a7a86', card: '#17171d', fg: '#ededf1', bg: '#0b0b0f' };
+    return { accent: '#a3e635', grid: '#3a3a44', muted: '#7a7a86', card: '#232329', fg: '#ededf1', bg: '#1a1a1f' };
   }
   const s = getComputedStyle(document.documentElement);
   return {
     accent: s.getPropertyValue('--color-accent').trim() || '#a3e635',
-    grid: s.getPropertyValue('--color-border').trim() || '#2a2a34',
+    grid: s.getPropertyValue('--color-border').trim() || '#3a3a44',
     muted: s.getPropertyValue('--color-muted').trim() || '#7a7a86',
-    card: s.getPropertyValue('--color-card').trim() || '#17171d',
+    card: s.getPropertyValue('--color-card').trim() || '#232329',
     fg: s.getPropertyValue('--color-fg').trim() || '#ededf1',
-    bg: s.getPropertyValue('--color-bg').trim() || '#0b0b0f',
+    bg: s.getPropertyValue('--color-bg').trim() || '#1a1a1f',
   };
 }
 
