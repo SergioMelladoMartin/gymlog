@@ -42,10 +42,38 @@ let status: DbStatus = 'idle';
 let statusError: unknown = null;
 let statusListeners: Array<(s: DbStatus) => void> = [];
 
+// Auto-retry bookkeeping for a load that failed to reach Drive. We back off
+// 2s → 4s → … capped, and stop after a handful of tries (an `online` /
+// visibility event, or a manual reload, can still kick a fresh attempt).
+let loadRetryTimer: ReturnType<typeof setTimeout> | null = null;
+let loadRetryCount = 0;
+let lastLoadOptions: { seedUrl?: string } = {};
+const MAX_LOAD_RETRIES = 6;
+
 function setStatus(s: DbStatus, err?: unknown) {
   status = s;
   statusError = err ?? null;
+  if (s === 'ready') loadRetryCount = 0; // a good load clears the backoff
   for (const l of statusListeners) l(s);
+}
+
+function scheduleLoadRetry(options: { seedUrl?: string }) {
+  if (loadRetryTimer || loadRetryCount >= MAX_LOAD_RETRIES) return;
+  const delay = Math.min(30_000, 2_000 * 2 ** loadRetryCount);
+  loadRetryCount++;
+  loadRetryTimer = setTimeout(() => {
+    loadRetryTimer = null;
+    if (status === 'error') void loadDatabase(options).catch(() => {});
+  }, delay);
+}
+
+/** Manually re-attempt a failed load (e.g. user tapped "reintentar", or the
+ *  network just came back). Resets the backoff so it tries right away. */
+export function retryLoad(): void {
+  if (status === 'ready' || status === 'loading') return;
+  loadRetryCount = 0;
+  if (loadRetryTimer) { clearTimeout(loadRetryTimer); loadRetryTimer = null; }
+  void loadDatabase(lastLoadOptions).catch(() => {});
 }
 
 export function getStatus(): { status: DbStatus; error: unknown } {
@@ -395,6 +423,7 @@ async function requestPersistentStorage(): Promise<void> {
 
 export async function loadDatabase(options: { seedUrl?: string } = {}): Promise<void> {
   if (status === 'loading' || status === 'ready') return;
+  lastLoadOptions = options;
   setStatus('loading');
   try {
     await initSqlite();
@@ -428,17 +457,42 @@ export async function loadDatabase(options: { seedUrl?: string } = {}): Promise<
     //    than what we have cached locally — otherwise changes made on another
     //    device (e.g. the phone) would never show up until OPFS is wiped.
     //    Skipped while pending: those bytes are not safe to overwrite yet.
+    //
+    //    We track whether the Drive read actually SUCCEEDED (vs. threw on a
+    //    flaky network / expired token). This matters for the no-local-copy
+    //    branch below: fabricating + pushing an empty DB is only safe when we
+    //    are certain Drive has nothing to lose. A read that merely *failed*
+    //    must NOT be mistaken for "Drive is empty".
+    let remoteReadFailed = false;
+    let remoteFileExists = false;
     if (isSignedIn() && !isPending()) {
-      const meta = await getRemoteMeta().catch(() => null);
+      let meta: Awaited<ReturnType<typeof getRemoteMeta>> | null = null;
+      try {
+        meta = await getRemoteMeta();
+      } catch (e) {
+        remoteReadFailed = true;
+        console.error('[load] getRemoteMeta failed', e);
+      }
       if (meta) {
+        remoteFileExists = true;
         const stored = readStoredMeta();
         const isNewer = !stored || stored.modifiedTime !== meta.modifiedTime || stored.size !== meta.size;
         if (!bytes || isNewer) {
-          const remote = await pullBlobFromDrive().catch(() => null);
+          let remote: ArrayBuffer | null = null;
+          try {
+            remote = await pullBlobFromDrive();
+          } catch (e) {
+            remoteReadFailed = true;
+            console.error('[load] pullBlobFromDrive failed', e);
+          }
           if (remote) {
             bytes = new Uint8Array(remote);
             await opfsWrite(bytes);
             writeStoredMeta(meta);
+          } else if (!bytes) {
+            // Drive has a file but we couldn't download it and have nothing
+            // local to fall back on → recoverable error, not "empty".
+            remoteReadFailed = true;
           }
         }
       }
@@ -454,13 +508,27 @@ export async function loadDatabase(options: { seedUrl?: string } = {}): Promise<
     }
 
     if (!bytes) {
-      // No local copy, no Drive backup, no seed → start fresh with an empty
-      // FitNotes-compatible schema. Push it to Drive immediately so future
-      // devices find the same file.
+      // We have no local copy. Creating a fresh empty DB and pushing it is
+      // only safe when we are CERTAIN there's nothing on Drive to overwrite.
+      // If we're signed in but the Drive read failed — OR it told us a file
+      // exists that we just couldn't download — pushing an empty DB now would
+      // clobber the real backup (this is exactly the "opened on the laptop,
+      // network hiccuped, lost everything" trap). Bail to a recoverable error
+      // and let the retry below pull once Drive is reachable again.
+      if (isSignedIn() && (remoteReadFailed || remoteFileExists)) {
+        console.warn('[load] no local copy and Drive unreadable — refusing to seed/clobber, will retry');
+        setStatus('error', new Error('No se pudo cargar tu copia de Google Drive. Reintentando…'));
+        scheduleLoadRetry(options);
+        return;
+      }
+
+      // Genuinely nothing anywhere (new user with Drive confirmed empty, or
+      // signed-out dev/seed context). Start fresh with an empty schema.
       db = createEmptyDatabase();
       db.exec('PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;');
       setStatus('ready');
-      scheduleSync(true).catch(() => {});
+      // Only push when signed in AND we confirmed Drive is empty — never blind.
+      if (isSignedIn()) scheduleSync(true).catch(() => {});
       return;
     }
 
@@ -790,17 +858,21 @@ if (typeof window !== 'undefined') {
     if (document.visibilityState === 'hidden') {
       if (dirty) void flushToDrive().catch(() => {});
     } else if (document.visibilityState === 'visible') {
-      // Came back from background. First, finish any pending upload from
-      // this device. Then check whether another device (the phone, the
-      // desktop) pushed something while we were away.
+      // Came back from background. If a previous load bailed because Drive
+      // was unreachable, retry now that we're foregrounded. Otherwise finish
+      // any pending upload and check whether another device pushed an update.
+      if (status === 'error') { retryLoad(); return; }
       drainPending();
       checkForRemoteUpdates().catch(() => {});
     }
   });
 
-  // Network came back — drain pending immediately rather than waiting for
-  // the next visibility event.
-  window.addEventListener('online', drainPending);
+  // Network came back — retry a stalled load first, else drain pending
+  // immediately rather than waiting for the next visibility event.
+  window.addEventListener('online', () => {
+    if (status === 'error') { retryLoad(); return; }
+    drainPending();
+  });
 
   // Background poll: every 2 minutes while foreground, check remote AND
   // try to drain pending in case a previous push silently failed.

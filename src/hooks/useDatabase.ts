@@ -13,7 +13,11 @@ export function useDatabase(): boolean {
   useEffect(() => {
     const off = onStatusChange(setStatus);
     if (status === 'idle') {
-      loadDatabase({ seedUrl: '/seed.fitnotes' }).catch(console.error);
+      // The bundled seed is a DEV convenience only. In production a brand-new
+      // user (empty Drive) must start with a clean empty DB — never with the
+      // seed's data, which would otherwise get pushed up to their Drive and
+      // look like someone else's workouts. Matches LoginView's gating.
+      loadDatabase({ seedUrl: import.meta.env.DEV ? '/seed.fitnotes' : undefined }).catch(console.error);
     }
     return off;
     // eslint-disable-next-line react-hooks/exhaustive-deps
