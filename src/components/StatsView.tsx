@@ -40,6 +40,8 @@ export default function StatsView() {
   const [groupBy, setGroupBy] = useState<GroupBy>('week');
   const [trendMetric, setTrendMetric] = useState<TrendMetric>('workouts');
   const [trend, setTrend] = useState<TrendRow[]>([]);
+  // Weeks span a wider window than months so the bars cover a useful period.
+  const trendLimit = groupBy === 'week' ? 26 : 12;
 
   useEffect(() => {
     if (!ready) return;
@@ -138,7 +140,7 @@ export default function StatsView() {
        FROM training_log
        GROUP BY period
        ORDER BY period DESC
-       LIMIT 12`,
+       LIMIT ${trendLimit}`,
     );
     // Reverse to chronological order for the chart.
     setTrend(
@@ -150,7 +152,7 @@ export default function StatsView() {
         volume: Number(r.volume ?? 0),
       })),
     );
-  }, [ready, groupBy]);
+  }, [ready, groupBy, trendLimit]);
 
   if (!ready) return <div className="flex min-h-[50vh] items-center justify-center text-muted"><div className="h-8 w-8 animate-spin rounded-full border-2 border-border border-t-accent" /></div>;
 
@@ -200,7 +202,7 @@ export default function StatsView() {
       <div className="card mb-5 p-4">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div className="section-title">
-            Tendencia · {groupBy === 'week' ? 'últimas 12 semanas' : 'últimos 12 meses'}
+            Tendencia · {groupBy === 'week' ? `últimas ${trendLimit} semanas` : `últimos ${trendLimit} meses`}
           </div>
           <div className="flex gap-1 rounded-full border border-border bg-card p-0.5 text-[11px] font-medium">
             {(['week', 'month'] as const).map((g) => (
