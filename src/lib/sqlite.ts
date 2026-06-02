@@ -546,7 +546,22 @@ export async function importBytes(bytes: Uint8Array): Promise<void> {
     // Don't bail — the in-memory DB is already usable.
   }
   setStatus('ready');
-  scheduleSync(true);
+
+  // Treat the just-imported bytes as unpushed local edits: mark the pending
+  // bit and push to Drive. This is critical — without `pending`, a caller
+  // that navigates away before the push lands (LoginView does an immediate
+  // window.location.replace) leaves the OPFS copy as the only source of
+  // truth, and the next load's "remote newer?" check would pull the older
+  // (often empty, freshly-seeded) Drive file and clobber the import. With
+  // the bit set, the next load instead self-heals by pushing OPFS up first.
+  // We also await the push so the data reaches Drive before any redirect.
+  setPending(true);
+  try {
+    await scheduleSync(true);
+  } catch (e) {
+    console.error('[import] initial sync failed; will self-heal on next load', e);
+    // pending stays set → load-time self-heal re-pushes the OPFS bytes.
+  }
 }
 
 export function getDb(): Database {
