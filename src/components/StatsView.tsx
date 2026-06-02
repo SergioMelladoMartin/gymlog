@@ -179,30 +179,17 @@ export default function StatsView() {
 
   return (
     <>
-      <div className="mb-4">
-        <div className="text-xs font-medium uppercase tracking-wider text-muted">Resumen</div>
+      <div className="mb-5">
+        <div className="text-xs font-medium uppercase tracking-wider text-muted">Tu progreso</div>
         <h1 className="text-3xl font-semibold tracking-tight">Estadísticas</h1>
-        <div className="mt-1 text-sm capitalize text-muted">{label}</div>
       </div>
 
-      <div className="no-scrollbar mb-5 -mx-1 flex gap-1.5 overflow-x-auto px-1">
-        {chips.map((c) => (
-          <a key={c.id} href={c.href} className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition ${c.match ? 'bg-accent text-ink' : 'bg-card text-muted hover:text-fg'}`}>{c.label}</a>
-        ))}
-      </div>
-
-      <div className="mb-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <Tile label="Días" value={String(totals.total_days)} />
-        <Tile label="Sets" value={fmt(totals.total_sets)} />
-        <Tile label="Ejercicios" value={String(totals.total_exercises)} />
-        <Tile label="Volumen" value={`${Math.round(totals.total_volume / 1000)}k`} unit="kg" />
-      </div>
-
-      {/* Trend over time — own controls (week/month + metric), last 12 periods */}
-      <div className="card mb-5 p-4">
+      {/* ── Zone 1 · Evolución (its own week/month window, independent of the
+          range chips below) ─────────────────────────────────────────────── */}
+      <div className="card mb-6 p-4">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div className="section-title">
-            Tendencia · {groupBy === 'week' ? `últimas ${trendLimit} semanas` : `últimos ${trendLimit} meses`}
+            Evolución · {groupBy === 'week' ? `${trendLimit} semanas` : `${trendLimit} meses`}
           </div>
           <div className="flex gap-1 rounded-full border border-border bg-card p-0.5 text-[11px] font-medium">
             {(['week', 'month'] as const).map((g) => (
@@ -234,6 +221,26 @@ export default function StatsView() {
         <Suspense fallback={<div className="grid h-56 place-items-center"><div className="h-7 w-7 animate-spin rounded-full border-2 border-border border-t-accent" /></div>}>
           <StatsTrendChart data={trendData} unit={activeTrend.unit} />
         </Suspense>
+      </div>
+
+      {/* ── Zone 2 · Resumen del periodo — everything below is scoped to the
+          selected range chip ────────────────────────────────────────────── */}
+      <div className="mb-2 flex items-baseline justify-between gap-2">
+        <div className="section-title">Resumen del periodo</div>
+        <div className="text-xs capitalize text-muted">{label}</div>
+      </div>
+
+      <div className="no-scrollbar mb-4 -mx-1 flex gap-1.5 overflow-x-auto px-1">
+        {chips.map((c) => (
+          <a key={c.id} href={c.href} className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition ${c.match ? 'bg-accent text-ink' : 'bg-card text-muted hover:text-fg'}`}>{c.label}</a>
+        ))}
+      </div>
+
+      <div className="mb-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <Tile label="Días" value={String(totals.total_days)} />
+        <Tile label="Sets" value={fmt(totals.total_sets)} />
+        <Tile label="Ejercicios" value={String(totals.total_exercises)} />
+        <Tile label="Volumen" value={`${Math.round(totals.total_volume / 1000)}k`} unit="kg" />
       </div>
 
       <div className="card mb-5 p-4">
