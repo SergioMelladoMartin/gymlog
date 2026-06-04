@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { signOut } from '../lib/auth';
-import { exportBytes, importBytes, resetLocal, scheduleSync, wipeAll } from '../lib/sqlite';
+import { exportBytes, importBytes, resetLocal, wipeAll } from '../lib/sqlite';
 import { useT } from '../hooks/useT';
 import { setLang, type Lang } from '../lib/i18n';
 
@@ -75,8 +75,7 @@ export default function SettingsView() {
     setImporting(true);
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
-      await importBytes(bytes);
-      await scheduleSync(true);
+      await importBytes(bytes); // already persists + pushes to Drive
       window.location.assign('/');
     } catch (e: any) {
       // Log the full error to the console so it's easy to ask the user to

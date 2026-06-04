@@ -312,44 +312,52 @@ function addColumnIfMissing(
   col: string,
   ddl: string,
   existing: Set<string>,
-) {
-  if (existing.has(col)) return;
+): boolean {
+  if (existing.has(col)) return false;
   db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${ddl}`);
   existing.add(col);
+  return true;
 }
 
-function migrateSchema(db: Database): void {
+/** Brings an arbitrary FitNotes export up to the schema the app's queries
+ *  expect. Idempotent. Returns true if it actually changed anything, so the
+ *  caller can persist the upgraded bytes once. */
+function migrateSchema(db: Database): boolean {
+  let changed = false;
+  const add = (table: string, col: string, ddl: string, cols: Set<string>) => {
+    if (addColumnIfMissing(db, table, col, ddl, cols)) changed = true;
+  };
   // ---- training_log: cardio fields + flags ------------------------------
   if (tableExists(db, 'training_log')) {
     const cols = columnNames(db, 'training_log');
-    addColumnIfMissing(db, 'training_log', 'unit',                            'INTEGER NOT NULL DEFAULT 0', cols);
-    addColumnIfMissing(db, 'training_log', 'routine_section_exercise_set_id', 'INTEGER NOT NULL DEFAULT 0', cols);
-    addColumnIfMissing(db, 'training_log', 'timer_auto_start',                'INTEGER NOT NULL DEFAULT 0', cols);
-    addColumnIfMissing(db, 'training_log', 'is_personal_record',              'INTEGER NOT NULL DEFAULT 0', cols);
-    addColumnIfMissing(db, 'training_log', 'is_personal_record_first',        'INTEGER NOT NULL DEFAULT 0', cols);
-    addColumnIfMissing(db, 'training_log', 'is_complete',                     'INTEGER NOT NULL DEFAULT 0', cols);
-    addColumnIfMissing(db, 'training_log', 'is_pending_update',               'INTEGER NOT NULL DEFAULT 0', cols);
-    addColumnIfMissing(db, 'training_log', 'distance',                        'REAL NOT NULL DEFAULT 0',    cols);
-    addColumnIfMissing(db, 'training_log', 'duration_seconds',                'INTEGER NOT NULL DEFAULT 0', cols);
+    add('training_log', 'unit',                            'INTEGER NOT NULL DEFAULT 0', cols);
+    add('training_log', 'routine_section_exercise_set_id', 'INTEGER NOT NULL DEFAULT 0', cols);
+    add('training_log', 'timer_auto_start',                'INTEGER NOT NULL DEFAULT 0', cols);
+    add('training_log', 'is_personal_record',              'INTEGER NOT NULL DEFAULT 0', cols);
+    add('training_log', 'is_personal_record_first',        'INTEGER NOT NULL DEFAULT 0', cols);
+    add('training_log', 'is_complete',                     'INTEGER NOT NULL DEFAULT 0', cols);
+    add('training_log', 'is_pending_update',               'INTEGER NOT NULL DEFAULT 0', cols);
+    add('training_log', 'distance',                        'REAL NOT NULL DEFAULT 0',    cols);
+    add('training_log', 'duration_seconds',                'INTEGER NOT NULL DEFAULT 0', cols);
   }
 
   // ---- exercise: extended metadata -------------------------------------
   if (tableExists(db, 'exercise')) {
     const cols = columnNames(db, 'exercise');
-    addColumnIfMissing(db, 'exercise', 'exercise_type_id',  'INTEGER NOT NULL DEFAULT 0', cols);
-    addColumnIfMissing(db, 'exercise', 'notes',             'TEXT',                       cols);
-    addColumnIfMissing(db, 'exercise', 'weight_increment',  'INTEGER',                    cols);
-    addColumnIfMissing(db, 'exercise', 'default_graph_id',  'INTEGER',                    cols);
-    addColumnIfMissing(db, 'exercise', 'default_rest_time', 'INTEGER',                    cols);
-    addColumnIfMissing(db, 'exercise', 'weight_unit_id',    'INTEGER NOT NULL DEFAULT 0', cols);
-    addColumnIfMissing(db, 'exercise', 'is_favourite',      'INTEGER NOT NULL DEFAULT 0', cols);
+    add('exercise', 'exercise_type_id',  'INTEGER NOT NULL DEFAULT 0', cols);
+    add('exercise', 'notes',             'TEXT',                       cols);
+    add('exercise', 'weight_increment',  'INTEGER',                    cols);
+    add('exercise', 'default_graph_id',  'INTEGER',                    cols);
+    add('exercise', 'default_rest_time', 'INTEGER',                    cols);
+    add('exercise', 'weight_unit_id',    'INTEGER NOT NULL DEFAULT 0', cols);
+    add('exercise', 'is_favourite',      'INTEGER NOT NULL DEFAULT 0', cols);
   }
 
   // ---- Category: colour + sort_order -----------------------------------
   if (tableExists(db, 'Category')) {
     const cols = columnNames(db, 'Category');
-    addColumnIfMissing(db, 'Category', 'colour',     'INTEGER NOT NULL DEFAULT 0', cols);
-    addColumnIfMissing(db, 'Category', 'sort_order', 'INTEGER NOT NULL DEFAULT 0', cols);
+    add('Category', 'colour',     'INTEGER NOT NULL DEFAULT 0', cols);
+    add('Category', 'sort_order', 'INTEGER NOT NULL DEFAULT 0', cols);
   }
 
   // ---- Optional satellite tables ---------------------------------------
@@ -359,6 +367,7 @@ function migrateSchema(db: Database): void {
       date TEXT NOT NULL,
       comment TEXT NOT NULL
     )`);
+    changed = true;
   }
   if (!tableExists(db, 'BodyWeight')) {
     db.exec(`CREATE TABLE BodyWeight (
@@ -368,11 +377,13 @@ function migrateSchema(db: Database): void {
       body_fat REAL NOT NULL DEFAULT 0,
       comments TEXT
     )`);
+    changed = true;
   } else {
     const cols = columnNames(db, 'BodyWeight');
-    addColumnIfMissing(db, 'BodyWeight', 'body_fat', 'REAL NOT NULL DEFAULT 0', cols);
-    addColumnIfMissing(db, 'BodyWeight', 'comments', 'TEXT',                    cols);
+    add('BodyWeight', 'body_fat', 'REAL NOT NULL DEFAULT 0', cols);
+    add('BodyWeight', 'comments', 'TEXT',                    cols);
   }
+  return changed;
 }
 
 // ── OPFS persistence ───────────────────────────────────────────────────
@@ -522,20 +533,35 @@ export async function loadDatabase(options: { seedUrl?: string } = {}): Promise<
         return;
       }
 
-      // Genuinely nothing anywhere (new user with Drive confirmed empty, or
-      // signed-out dev/seed context). Start fresh with an empty schema.
+      // Anonymous visitor with nothing stored locally: don't fabricate a
+      // local-only DB they could scribble into (it would never sync). Mark
+      // 'empty' so useDatabase() bounces them to /login. Returning users keep
+      // working because their OPFS copy is found above before we get here.
+      if (!isSignedIn()) {
+        setStatus('empty');
+        return;
+      }
+
+      // Signed in with Drive confirmed empty → genuinely new user. Start fresh
+      // with an empty schema and push it so future devices find the same file.
       db = createEmptyDatabase();
       db.exec('PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;');
       setStatus('ready');
-      // Only push when signed in AND we confirmed Drive is empty — never blind.
-      if (isSignedIn()) scheduleSync(true).catch(() => {});
+      scheduleSync(true).catch(() => {});
       return;
     }
 
     db = openFromBytes(bytes);
     db.exec('PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;');
-    migrateSchema(db);
+    const migrated = migrateSchema(db);
     setStatus('ready');
+    // If the file was an older FitNotes schema we just upgraded, persist the
+    // migrated bytes once — otherwise we'd re-run the migration on every load
+    // and Drive/other devices would never get the newer shape.
+    if (migrated) {
+      try { await opfsWrite(serialize(db)); } catch (e) { console.error('[load] persist migrated bytes', e); }
+      if (isSignedIn()) scheduleSync(true).catch(() => {});
+    }
   } catch (e) {
     console.error('loadDatabase', e);
     setStatus('error', e);

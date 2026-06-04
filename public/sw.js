@@ -12,7 +12,7 @@
 // this SW has cached the shell, the whole thing works offline except the
 // Drive sync which is gated on network anyway.
 
-const CACHE_VERSION = 'gymlog-v1';
+const CACHE_VERSION = 'gymlog-v2';
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const ASSET_CACHE = `${CACHE_VERSION}-assets`;
 
@@ -112,6 +112,12 @@ self.addEventListener('fetch', (event) => {
           const cache = await caches.open(SHELL_CACHE);
           const hit = await cache.match(req);
           if (hit) return hit;
+          // Deep link with query params (e.g. /exercise?id=123) whose exact
+          // URL wasn't cached → fall back to the precached BASE route so the
+          // right page shell loads offline (the view reads the id from the URL
+          // at runtime), instead of dumping the user on the home shell.
+          const base = await cache.match(url.pathname);
+          if (base) return base;
           const shell = await cache.match('/');
           return shell ?? Response.error();
         }

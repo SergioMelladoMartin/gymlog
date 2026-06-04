@@ -10,8 +10,7 @@
     "build": "astro build",
     "preview": "astro preview",
     "astro": "astro",
-    "db:migrate": "tsx scripts/migrate.ts",
-    "db:import": "tsx scripts/import-fitnotes.ts"
+    "export-json": "tsx scripts/export-to-json.ts"
   },
   "dependencies": {
     "@astrojs/react": "^5.0.3",
