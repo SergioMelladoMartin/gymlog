@@ -39,9 +39,10 @@ export default function LoginView() {
   }
 
   return (
-    <div className="mx-auto flex min-h-[60vh] max-w-sm flex-col justify-center gap-6 py-10">
+    <div className="mx-auto flex min-h-[70vh] max-w-sm flex-col justify-center py-10">
+      <div className="card flex flex-col gap-6 p-6 sm:p-8">
       <div className="text-center">
-        <div className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-2xl bg-accent text-ink">
+        <div className="btn-accent accent-glow mx-auto mb-4 grid h-14 w-14 place-items-center rounded-2xl">
           <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <path d="M14.4 14.4 9.6 9.6" />
             <path d="M18.657 21.485a2 2 0 1 1-2.829-2.828l-1.767 1.768a2 2 0 1 1-2.829-2.829l6.364-6.364a2 2 0 1 1 2.829 2.829l-1.768 1.767a2 2 0 1 1 2.828 2.829z" />
@@ -60,7 +61,7 @@ export default function LoginView() {
         type="button"
         onClick={handleGoogle}
         disabled={busy}
-        className="flex items-center justify-center gap-3 rounded-xl border border-border bg-card px-4 py-3 font-medium transition hover:border-strong hover:bg-elevated disabled:opacity-50"
+        className="flex items-center justify-center gap-3 rounded-xl border border-border bg-elevated/70 px-4 py-3 font-medium transition hover:border-strong hover:bg-elevated disabled:opacity-50"
       >
         <svg width="18" height="18" viewBox="0 0 24 24">
           <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.19 3.32v2.77h3.54c2.08-1.92 3.29-4.74 3.29-8.1z"/>
@@ -71,12 +72,13 @@ export default function LoginView() {
         {busy ? 'Conectando…' : 'Continuar con Google'}
       </button>
 
-      <div className="relative my-2 text-center text-xs uppercase tracking-wider text-muted">
-        <span className="relative z-10 bg-bg px-2">o</span>
-        <span className="absolute inset-x-0 top-1/2 -z-0 h-px bg-border" />
+      <div className="my-2 flex items-center gap-3 text-xs uppercase tracking-wider text-muted">
+        <span className="h-px flex-1 bg-border" />
+        o
+        <span className="h-px flex-1 bg-border" />
       </div>
 
-      <label className="flex cursor-pointer items-center justify-center gap-3 rounded-xl border border-dashed border-border bg-card/50 px-4 py-3 text-sm text-muted transition hover:border-strong hover:text-fg">
+      <label className="flex cursor-pointer items-center justify-center gap-3 rounded-xl border border-dashed border-border bg-elevated/40 px-4 py-3 text-sm text-muted transition hover:border-strong hover:text-fg">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
           <polyline points="17 8 12 3 7 8" />
@@ -104,6 +106,7 @@ export default function LoginView() {
         Con Google: pedimos acceso <b>solo</b> a la carpeta oculta "appdata" de tu Drive.
         Tus entrenos se guardan en un archivo <code>gymlog.fitnotes</code> compatible con la app FitNotes.
       </p>
+      </div>
     </div>
   );
 }

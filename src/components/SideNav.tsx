@@ -173,7 +173,9 @@ export default function SideNav({ active }: Props) {
     left: 0,
     height: '100dvh',
     width: isDesktop ? (collapsed ? '72px' : '260px') : 'min(320px, 85vw)',
-    background: 'var(--color-card)',
+    background: 'color-mix(in srgb, var(--color-bg) 55%, transparent)',
+    backdropFilter: 'blur(24px) saturate(var(--glass-saturate))',
+    WebkitBackdropFilter: 'blur(24px) saturate(var(--glass-saturate))',
     borderRight: '1px solid var(--color-border)',
     boxShadow: isDesktop ? 'none' : '0 10px 40px -8px rgba(0, 0, 0, 0.55)',
     transform: visible ? 'translateX(0)' : 'translateX(-100%)',
@@ -207,7 +209,7 @@ export default function SideNav({ active }: Props) {
             onClick={() => setOpen(false)}
             title={isCollapsed ? 'gymlog' : undefined}
           >
-            <span className="grid h-8 w-8 place-items-center rounded-lg bg-accent text-ink">
+            <span className="btn-accent accent-glow grid h-8 w-8 place-items-center rounded-lg">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M14.4 14.4 9.6 9.6" />
                 <path d="M18.657 21.485a2 2 0 1 1-2.829-2.828l-1.767 1.768a2 2 0 1 1-2.829-2.829l6.364-6.364a2 2 0 1 1 2.829 2.829l-1.768 1.767a2 2 0 1 1 2.828 2.829z" />
@@ -269,9 +271,9 @@ export default function SideNav({ active }: Props) {
                 onClick={() => setOpen(false)}
                 aria-current={isActive ? 'page' : undefined}
                 title={isCollapsed ? t(item.labelKey) : undefined}
-                className={`flex items-center rounded-lg text-sm font-medium transition ${
+                className={`flex items-center rounded-xl text-sm font-medium transition ${
                   isCollapsed ? 'justify-center px-0 py-2.5' : 'gap-3 px-3 py-2.5'
-                } ${isActive ? 'bg-accent text-ink' : 'text-fg hover:bg-elevated'}`}
+                } ${isActive ? 'btn-accent accent-glow' : 'text-fg hover:bg-elevated/70'}`}
               >
                 <span className={isActive ? '' : 'text-muted'}>{item.icon}</span>
                 {!isCollapsed && t(item.labelKey)}

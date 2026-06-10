@@ -81,7 +81,7 @@ export default function StatsTrendChart({
               if (!props.active || !props.payload?.length) return null;
               const p = props.payload[0].payload as TrendPoint;
               return (
-                <div className="pointer-events-none rounded-lg border border-border bg-card/95 px-2.5 py-1.5 text-[11px] shadow-md">
+                <div className="glass pointer-events-none rounded-lg px-2.5 py-1.5 text-[11px]">
                   <div className="font-medium text-fg">{p.label}</div>
                   <div className="mt-0.5 tabular-nums">
                     <span className="text-base font-semibold tracking-tight">

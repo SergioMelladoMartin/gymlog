@@ -285,7 +285,7 @@ function ChartTooltip({
   }
 
   return (
-    <div className="pointer-events-none rounded-lg border border-border bg-card/95 px-2.5 py-1.5 text-[11px] shadow-md">
+    <div className="glass pointer-events-none rounded-lg px-2.5 py-1.5 text-[11px]">
       <div className="font-medium capitalize text-fg">{prettyDate}</div>
       <div className="mt-0.5 tabular-nums">
         <span className="text-base font-semibold tracking-tight">{formatKg(p.value)}</span>
