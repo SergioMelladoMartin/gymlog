@@ -8,7 +8,11 @@ import tailwindcss from '@tailwindcss/vite';
 export default defineConfig({
   output: 'static',
   integrations: [react()],
-  prefetch: { prefetchAll: true, defaultStrategy: 'load' },
+  // 'hover' instead of 'load': with 'load', pages like the diary (dozens of
+  // unique /day?d=… hrefs, all resolving to the same static shell) fired a
+  // prefetch per link on every page load. Hover/touchstart is still ~instant
+  // for a static site and costs one request per *intended* navigation.
+  prefetch: { prefetchAll: true, defaultStrategy: 'hover' },
   vite: {
     plugins: [tailwindcss()],
     // sqlite-wasm ships a .wasm asset; keep it untouched by the bundler.

@@ -4,8 +4,8 @@
   "description": "Tracker de gimnasio con sync a tu Google Drive",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#1a1a1f",
-  "theme_color": "#1a1a1f",
+  "background_color": "#0f0f15",
+  "theme_color": "#0f0f15",
   "icons": [
     { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml" }
   ]

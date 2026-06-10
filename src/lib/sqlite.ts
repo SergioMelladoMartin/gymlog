@@ -319,6 +319,17 @@ function addColumnIfMissing(
   return true;
 }
 
+/** Creates an index unless it already exists. Returns true if created. */
+function ensureIndex(db: Database, name: string, ddl: string): boolean {
+  const exists = Number(db.selectValue(
+    'SELECT COUNT(*) FROM sqlite_master WHERE type = ? AND name = ?',
+    ['index', name],
+  ) ?? 0) > 0;
+  if (exists) return false;
+  db.exec(ddl);
+  return true;
+}
+
 /** Brings an arbitrary FitNotes export up to the schema the app's queries
  *  expect. Idempotent. Returns true if it actually changed anything, so the
  *  caller can persist the upgraded bytes once. */
@@ -360,6 +371,18 @@ function migrateSchema(db: Database): boolean {
     add('Category', 'sort_order', 'INTEGER NOT NULL DEFAULT 0', cols);
   }
 
+  // ---- Indexes (app-owned, harmless to the FitNotes Android app) -------
+  // The PR badges run correlated subqueries per set over the whole
+  // training_log filtered by exercise_id (+ date), and every calendar /
+  // diary / stats view groups or filters by date. Without indexes each of
+  // those is a full table scan — noticeable in WASM once the log passes a
+  // few thousand sets (the year heatmap alone runs hundreds of them).
+  // Prefixed `gymlog_` so they never collide with FitNotes' own schema.
+  changed = ensureIndex(db, 'gymlog_idx_tl_exercise_date',
+    'CREATE INDEX gymlog_idx_tl_exercise_date ON training_log(exercise_id, date)') || changed;
+  changed = ensureIndex(db, 'gymlog_idx_tl_date',
+    'CREATE INDEX gymlog_idx_tl_date ON training_log(date)') || changed;
+
   // ---- Optional satellite tables ---------------------------------------
   if (!tableExists(db, 'WorkoutComment')) {
     db.exec(`CREATE TABLE WorkoutComment (
@@ -383,6 +406,9 @@ function migrateSchema(db: Database): boolean {
     add('BodyWeight', 'body_fat', 'REAL NOT NULL DEFAULT 0', cols);
     add('BodyWeight', 'comments', 'TEXT',                    cols);
   }
+  // Index after the table is guaranteed to exist.
+  changed = ensureIndex(db, 'gymlog_idx_wc_date',
+    'CREATE INDEX gymlog_idx_wc_date ON WorkoutComment(date)') || changed;
   return changed;
 }
 
@@ -546,6 +572,7 @@ export async function loadDatabase(options: { seedUrl?: string } = {}): Promise<
       // with an empty schema and push it so future devices find the same file.
       db = createEmptyDatabase();
       db.exec('PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;');
+      migrateSchema(db); // fresh schema is current — this just adds the indexes
       setStatus('ready');
       scheduleSync(true).catch(() => {});
       return;

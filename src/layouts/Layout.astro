@@ -29,6 +29,8 @@ const navTitle = {
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="preconnect" href="https://rsms.me/" />
+    <!-- Font files load with CORS; that connection needs its own preconnect. -->
+    <link rel="preconnect" href="https://rsms.me/" crossorigin />
     <link rel="stylesheet" href="https://rsms.me/inter/inter.css" />
     <title>{title}</title>
     <ClientRouter />

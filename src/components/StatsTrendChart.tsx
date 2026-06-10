@@ -16,13 +16,13 @@ export interface TrendPoint {
 
 function readCssColors() {
   if (typeof window === 'undefined') {
-    return { accent: '#a3e635', grid: '#3a3a44', muted: '#7a7a86' };
+    return { accent: '#a3e635', grid: 'rgba(255,255,255,0.09)', muted: '#94949f' };
   }
   const s = getComputedStyle(document.documentElement);
   return {
     accent: s.getPropertyValue('--color-accent').trim() || '#a3e635',
-    grid: s.getPropertyValue('--color-border').trim() || '#3a3a44',
-    muted: s.getPropertyValue('--color-muted').trim() || '#7a7a86',
+    grid: s.getPropertyValue('--color-border').trim() || 'rgba(255,255,255,0.09)',
+    muted: s.getPropertyValue('--color-muted').trim() || '#94949f',
   };
 }
 
