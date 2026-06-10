@@ -2,10 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Category } from '../lib/types';
 import type { ExerciseExtra as Exercise, TrainingSetEx } from '../lib/queries';
 import {
+  copySetsFromDate as qCopySets,
   createExercise as qCreateExercise,
   createSet as qCreateSet,
   deleteSet as qDeleteSet,
   duplicateSet as qDuplicateSet,
+  getLastTrainingDateBefore as qLastTrainingDate,
   getSetsForDate as qGetSets,
   setWorkoutComment as qSetComment,
   updateSet as qUpdateSet,
@@ -38,7 +40,7 @@ interface DraftSet {
 }
 
 export default function WorkoutLogger({ date, exercises: initialExercises, categories, initialSets, initialComment }: Props) {
-  const { t } = useT();
+  const { t, lang } = useT();
   const [exercises, setExercises] = useState<Exercise[]>(initialExercises);
   const [sets, setSets] = useState<TrainingSet[]>(initialSets);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -52,6 +54,17 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
   // so the sets you've already logged stay easy to read — the form was
   // cluttering the view when it was always-on.
   const [openAdderId, setOpenAdderId] = useState<number | null>(null);
+  const [copying, setCopying] = useState(false);
+  // Rest timer: when the last set of THIS session was saved. Session-local on
+  // purpose — the FitNotes schema stores no time-of-day, only dates.
+  const [lastSetAt, setLastSetAt] = useState<number | null>(null);
+  const [, setTimerTick] = useState(0);
+
+  useEffect(() => {
+    if (!lastSetAt) return;
+    const id = setInterval(() => setTimerTick((x) => x + 1), 1000);
+    return () => clearInterval(id);
+  }, [lastSetAt]);
 
   // Sync incoming props when the parent finishes loading data from the
   // in-browser db. `useState(initialSets)` only reads props on first render,
@@ -104,6 +117,7 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
     const result = qCreateSet({ exercise_id: exerciseId, date, weight_kg: weight, reps });
     refreshSets();
     setPendingExerciseIds((prev) => prev.filter((id) => id !== exerciseId));
+    setLastSetAt(Date.now());
     // Light tap on save, stronger triple-buzz if we just set a PR.
     if (result?.pr_weight || result?.pr_reps) vibrate([20, 40, 20, 40, 40]);
     else vibrate(10);
@@ -120,6 +134,7 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
     });
     refreshSets();
     setPendingExerciseIds((prev) => prev.filter((id) => id !== exerciseId));
+    setLastSetAt(Date.now());
     vibrate(10);
   }
 
@@ -127,6 +142,7 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
     qDuplicateSet(setId);
     refreshSets();
     setEditingSetId(null);
+    setLastSetAt(Date.now());
     vibrate(10);
   }
 
@@ -193,6 +209,29 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
     return [...grouped, ...pending];
   }, [grouped, pendingExerciseIds]);
 
+  // "Repeat last workout" — only offered on a day with nothing logged yet.
+  const lastTrainingDate = useMemo(() => {
+    if (allCards.length > 0) return null;
+    try { return qLastTrainingDate(date); } catch { return null; }
+  }, [allCards.length, date]);
+
+  function copyLastWorkout() {
+    if (!lastTrainingDate || copying) return;
+    setCopying(true);
+    try {
+      qCopySets(lastTrainingDate, date);
+      refreshSets();
+      vibrate(10);
+    } catch (e) {
+      console.error('[copyLastWorkout]', e);
+    } finally {
+      setCopying(false);
+    }
+  }
+
+  const locale = lang === 'en' ? 'en-US' : 'es-ES';
+  const restSecs = lastSetAt ? Math.floor((Date.now() - lastSetAt) / 1000) : 0;
+
   // PR summary for today
   const prTotals = useMemo(() => {
     let w = 0, r = 0;
@@ -237,6 +276,27 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
         <div className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border bg-card/40 px-4 py-10 text-center">
           <div className="text-base font-semibold tracking-tight">{t('workout.noExercisesTitle')}</div>
           <div className="text-sm text-muted">{t('workout.noExercisesBody')}</div>
+          {lastTrainingDate && (
+            <>
+              <button
+                type="button"
+                onClick={copyLastWorkout}
+                disabled={copying}
+                className="btn-accent mt-3 inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm disabled:opacity-50"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                </svg>
+                {copying ? t('workout.copying') : t('workout.copyYesterday')}
+              </button>
+              <div className="text-[11px] text-muted">
+                {t('workout.copyYesterdayHint', {
+                  date: new Date(lastTrainingDate + 'T00:00:00').toLocaleDateString(locale, { weekday: 'short', day: 'numeric', month: 'short' }),
+                })}
+              </div>
+            </>
+          )}
         </div>
       ) : (
         <div className="flex flex-col gap-3">
@@ -318,6 +378,16 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
                     >
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
                     </button>
+                    {lastSetAt && (
+                      <div className="mb-2 flex items-center gap-1.5 text-[11px] text-muted" title={t('workout.restTimer')}>
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <circle cx="12" cy="12" r="10" />
+                          <polyline points="12 6 12 12 16 14" />
+                        </svg>
+                        <span className="font-semibold tabular-nums text-fg">{formatDuration(restSecs)}</span>
+                        {t('workout.restTimer').toLowerCase()}
+                      </div>
+                    )}
                     {cardio ? (
                       <QuickAddCardio exerciseId={exerciseId} onAdd={addCardioSet} lastSets={lastExSets} />
                     ) : (

@@ -8,5 +8,10 @@
   "theme_color": "#0f0f15",
   "icons": [
     { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ],
+  "shortcuts": [
+    { "name": "Hoy", "url": "/" },
+    { "name": "Calendario", "url": "/calendar" },
+    { "name": "Estadísticas", "url": "/stats" }
   ]
 }
