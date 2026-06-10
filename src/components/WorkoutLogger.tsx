@@ -208,7 +208,7 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
       {prTotals.any > 0 && (
         <div className="pr-shine relative overflow-hidden rounded-2xl border border-accent/40 bg-accent-soft px-4 py-3">
           <div className="flex items-center gap-3">
-            <span className="grid h-8 w-8 place-items-center rounded-full bg-accent text-ink">
+            <span className="btn-accent accent-glow grid h-8 w-8 place-items-center rounded-full">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M7.5 2h9l1.5 3h3.5l-2.5 5a6 6 0 0 1-4.4 3.85L14 18h2v2H8v-2h2l-.6-4.15A6 6 0 0 1 5 10L2.5 5H6zm0 2-.47.94L8.4 8.67A4 4 0 0 0 12 11a4 4 0 0 0 3.6-2.33L17.47 4.94 17 4z"/></svg>
             </span>
             <div>
@@ -458,7 +458,7 @@ function QuickAdd({
         // doesn't flicker close-then-open on every save.
         tabIndex={-1}
         onMouseDown={(e) => e.preventDefault()}
-        className="grid h-[52px] w-[52px] shrink-0 place-items-center rounded-xl bg-accent text-ink transition hover:brightness-110 active:scale-95 disabled:opacity-40"
+        className="btn-accent grid h-[52px] w-[52px] shrink-0 place-items-center rounded-xl active:scale-95 disabled:opacity-40"
         disabled={!draft.weight || !draft.reps}
         aria-label={justAdded ? 'Añadido' : 'Añadir set'}
       >
@@ -610,7 +610,7 @@ function ExercisePicker({
   const showGroupsIndex = !isSearching && stepCategory === null;
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-bg/95 backdrop-blur-xl">
+    <div className="fixed inset-0 z-50 flex flex-col bg-bg/75 backdrop-blur-2xl backdrop-saturate-150">
       <div className="mx-auto flex h-full w-full max-w-3xl flex-col px-4 pt-4 pb-2">
         {/* Top bar: back button (if inside group or searching) + search input + close */}
         <div className="flex items-center gap-2">
@@ -1058,7 +1058,7 @@ function QuickAddCardio({
         type="submit"
         tabIndex={-1}
         onMouseDown={(e) => e.preventDefault()}
-        className="grid h-[52px] w-[52px] shrink-0 place-items-center rounded-xl bg-accent text-ink transition hover:brightness-110 active:scale-95 disabled:opacity-40"
+        className="btn-accent grid h-[52px] w-[52px] shrink-0 place-items-center rounded-xl active:scale-95 disabled:opacity-40"
         disabled={!duration.trim()}
         aria-label={justAdded ? 'Añadido' : 'Añadir serie'}
       >

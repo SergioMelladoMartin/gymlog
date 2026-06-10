@@ -82,7 +82,7 @@ function DayHeader({ date, setCount, exerciseCount, volume, hasPr }: {
   const nextHref = `/day?d=${iso(next)}`;
 
   return (
-    <section className="relative mb-5 overflow-hidden rounded-2xl border border-border bg-card">
+    <section className="card relative mb-5 overflow-hidden">
       {isToday && <div className="absolute inset-x-0 top-0 h-0.5 bg-accent" />}
 
       <div className="flex items-center justify-between gap-2 px-4 pt-4 pb-3">

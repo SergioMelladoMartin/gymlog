@@ -1,51 +1,75 @@
 @import "tailwindcss";
 
-/* Tokens: the @theme values are literals (dark theme defaults). To switch
-   themes we just re-declare the same --color-* variables on :root[data-theme=...].
-   Tailwind-generated utilities read them live via var() so themes cascade. */
+/* ─────────────────────────────────────────────────────────────────────────
+   Design system · "liquid glass"
+   Tokens: the @theme values are literals (dark theme defaults). To switch
+   themes we just re-declare the same --color-* variables on
+   :root[data-theme=...]. Tailwind-generated utilities read them live via
+   var() so themes cascade.
+
+   Surfaces (card / elevated) are TRANSLUCENT — the glass effect comes from
+   the shared `card` / `card-elevated` / `stat-tile` / `glass*` utilities
+   which add backdrop blur + saturation, a 1px inner highlight and a soft
+   layered shadow. A fixed aurora layer behind the page (body::before) gives
+   the blur something colourful to refract.
+   ──────────────────────────────────────────────────────────────────────── */
 @theme {
   --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 
-  /* Dark theme = these defaults. Lifted off pure black to a soft dark grey
-     (à la Claude / Microsoft 365) — easier on the eyes than near-black while
-     keeping the subtle cool tint and the bg < card < elevated layering. */
-  --color-bg: #1a1a1f;
-  --color-fg: #ededf1;
-  --color-card: #232329;
-  --color-elevated: #2c2c34;
-  --color-border: #3a3a44;
-  --color-strong: #4a4a57;
-  --color-muted: #8a8a96;
-  --color-subtle: #a5a5b1;
+  /* Dark theme = these defaults. Deep, slightly cool base so the glass
+     layers above it read clearly. */
+  --color-bg: #0f0f15;
+  --color-fg: #f2f2f6;
+  --color-card: rgba(29, 29, 39, 0.62);
+  --color-elevated: rgba(58, 58, 76, 0.55);
+  --color-border: rgba(255, 255, 255, 0.09);
+  --color-strong: rgba(255, 255, 255, 0.22);
+  --color-muted: #94949f;
+  --color-subtle: #aeaeba;
   --color-accent: #a3e635;
   --color-ink: #0a1400;
   --color-accent-soft: rgba(163, 230, 53, 0.14);
   --color-danger: #ef4444;
   --color-success: #10b981;
 
-  --radius-card: 1rem;
-  --radius-lg: 0.75rem;
+  --radius-card: 1.25rem;
+  --radius-lg: 0.875rem;
 }
 
 :root,
 :root[data-theme='dark'] {
   color-scheme: dark;
-  --bg-glow:
-    radial-gradient(1200px 600px at 85% -10%, rgba(163, 230, 53, 0.06), transparent 60%),
-    radial-gradient(800px 400px at -10% 10%, rgba(124, 92, 255, 0.05), transparent 60%);
+
+  /* Glass recipe (per-theme): blur + saturation + inner highlight + shadow */
+  --glass-blur: 20px;
+  --glass-saturate: 1.5;
+  --glass-highlight: rgba(255, 255, 255, 0.07);
+  --shadow-glass:
+    inset 0 1px 0 var(--glass-highlight),
+    0 10px 32px -14px rgba(0, 0, 0, 0.55);
+  --shadow-float:
+    inset 0 1px 0 var(--glass-highlight),
+    0 24px 60px -18px rgba(0, 0, 0, 0.65);
+
+  /* Aurora behind everything — the primary glow follows the user accent. */
+  --aurora:
+    radial-gradient(1100px 750px at 85% -15%, color-mix(in srgb, var(--color-accent) 26%, transparent), transparent 64%),
+    radial-gradient(900px 650px at -15% 20%, rgba(124, 92, 255, 0.22), transparent 62%),
+    radial-gradient(1000px 750px at 50% 118%, rgba(56, 189, 248, 0.16), transparent 62%),
+    radial-gradient(600px 450px at 35% 45%, color-mix(in srgb, var(--color-accent) 7%, transparent), transparent 65%);
 }
 
 :root[data-theme='light'] {
   color-scheme: light;
 
-  --color-bg: #f7f7f8;
-  --color-fg: #0f0f12;
-  --color-card: #ffffff;
-  --color-elevated: #f0f0f3;
-  --color-border: #e2e2e7;
-  --color-strong: #cfcfd6;
-  --color-muted: #64646e;
-  --color-subtle: #4a4a52;
+  --color-bg: #eef0f5;
+  --color-fg: #101016;
+  --color-card: rgba(255, 255, 255, 0.66);
+  --color-elevated: rgba(255, 255, 255, 0.9);
+  --color-border: rgba(16, 16, 40, 0.1);
+  --color-strong: rgba(16, 16, 40, 0.24);
+  --color-muted: #5d5d68;
+  --color-subtle: #46464f;
   /* Mismo lima en ambos temas — ink oscuro garantiza contraste sobre el verde. */
   --color-accent: #a3e635;
   --color-ink: #0a1400;
@@ -53,14 +77,26 @@
   --color-danger: #dc2626;
   --color-success: #059669;
 
-  --bg-glow:
-    radial-gradient(1200px 600px at 85% -10%, rgba(163, 230, 53, 0.18), transparent 60%),
-    radial-gradient(800px 400px at -10% 10%, rgba(59, 130, 246, 0.05), transparent 60%);
+  --glass-blur: 20px;
+  --glass-saturate: 1.6;
+  --glass-highlight: rgba(255, 255, 255, 0.75);
+  --shadow-glass:
+    inset 0 1px 0 var(--glass-highlight),
+    0 10px 30px -14px rgba(30, 40, 80, 0.18);
+  --shadow-float:
+    inset 0 1px 0 var(--glass-highlight),
+    0 24px 60px -20px rgba(30, 40, 80, 0.3);
+
+  --aurora:
+    radial-gradient(1100px 750px at 85% -15%, color-mix(in srgb, var(--color-accent) 30%, transparent), transparent 64%),
+    radial-gradient(900px 650px at -15% 20%, rgba(124, 92, 255, 0.16), transparent 62%),
+    radial-gradient(1000px 750px at 50% 118%, rgba(56, 189, 248, 0.18), transparent 62%);
 }
 
 /* Accent variants — override lime with the selected colour via data-accent.
    `--color-ink` stays dark enough to read on the bg colour (WCAG AA for
-   buttons / badges). Applied on top of any theme. */
+   buttons / badges). Applied on top of any theme. The aurora picks the new
+   accent up automatically via color-mix(var(--color-accent)). */
 :root[data-accent='rose'] {
   --color-accent: #f472b6;
   --color-accent-soft: rgba(244, 114, 182, 0.22);
@@ -88,13 +124,45 @@
   --color-ink: var(--color-bg);
 }
 
+/* Translucency fallbacks: without backdrop-filter the glass surfaces would
+   be unreadable text-over-text, so re-solidify the tokens. Same when the
+   user explicitly asks the OS for less transparency. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root,
+  :root[data-theme='dark'] {
+    --color-card: #1d1d27;
+    --color-elevated: #2c2c39;
+  }
+  :root[data-theme='light'] {
+    --color-card: #ffffff;
+    --color-elevated: #e9ebf2;
+  }
+}
+@media (prefers-reduced-transparency: reduce) {
+  :root,
+  :root[data-theme='dark'] {
+    --color-card: #1d1d27;
+    --color-elevated: #2c2c39;
+    --glass-blur: 0px;
+  }
+  :root[data-theme='light'] {
+    --color-card: #ffffff;
+    --color-elevated: #e9ebf2;
+    --glass-blur: 0px;
+  }
+}
+
 /* Reset/base styles must live inside @layer base so Tailwind utility classes
    (which sit in @layer utilities) can override them. Un-layered rules beat
    any @layer, which was making `button { color: inherit }` win over
    `.text-ink { color: var(--color-ink) }`. */
 @layer base {
+  /* The page background lives on <html>, NOT on <body>: the aurora layer is
+     a body::before with z-index -1, which paints above the html canvas
+     background but would be covered by an opaque body background. */
+  html { background: var(--color-bg); }
+
   html, body {
-    background: var(--color-bg);
     color: var(--color-fg);
     font-family: var(--font-sans);
     font-feature-settings: 'ss01', 'cv11';
@@ -128,8 +196,19 @@
   }
 
   body {
-    background: var(--bg-glow), var(--color-bg);
     min-height: 100dvh;
+  }
+
+  /* Aurora — fixed colour washes the glass surfaces sample through their
+     backdrop blur. A separate fixed layer (not background-attachment:fixed,
+     which is broken on iOS Safari). */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background: var(--aurora);
   }
 
   * { box-sizing: border-box; }
@@ -151,16 +230,25 @@
   }
 }
 
+/* ── Glass surface utilities ─────────────────────────────────────────────
+   NOTE: backdrop-filter turns the element into a containing block for
+   fixed-position descendants — never render a fixed overlay inside one. */
 @utility card {
   background: var(--color-card);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-card);
+  box-shadow: var(--shadow-glass);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
 }
 
 @utility card-elevated {
   background: var(--color-elevated);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-card);
+  box-shadow: var(--shadow-glass);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
 }
 
 @utility stat-tile {
@@ -168,6 +256,34 @@
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   padding: 0.875rem 1rem;
+  box-shadow: var(--shadow-glass);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+}
+
+/* Free-form glass for ad-hoc surfaces (modals, pills, menus). */
+@utility glass {
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-glass);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+}
+
+/* Floating glass — modals/dialogs: stronger blur + deeper shadow. */
+@utility glass-float {
+  background: color-mix(in srgb, var(--color-card) 100%, transparent);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-float);
+  -webkit-backdrop-filter: blur(28px) saturate(var(--glass-saturate));
+  backdrop-filter: blur(28px) saturate(var(--glass-saturate));
+}
+
+/* Sticky bars (header, sticky search) — bg-tinted glass, no shadow. */
+@utility glass-bar {
+  background: color-mix(in srgb, var(--color-bg) 60%, transparent);
+  -webkit-backdrop-filter: blur(18px) saturate(var(--glass-saturate));
+  backdrop-filter: blur(18px) saturate(var(--glass-saturate));
 }
 
 @utility section-title {
@@ -179,19 +295,27 @@
 }
 
 @utility btn-accent {
-  background: var(--color-accent);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--color-accent) 86%, #fff), var(--color-accent));
   color: var(--color-ink);
   font-weight: 600;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    0 6px 20px -8px color-mix(in srgb, var(--color-accent) 60%, transparent);
   transition: filter 120ms ease, transform 120ms ease;
 
-  &:hover { filter: brightness(1.08); }
+  &:hover { filter: brightness(1.06); }
   &:active { transform: scale(0.97); }
+}
+
+/* Soft accent halo — logo tiles, active nav item, hero icons. */
+@utility accent-glow {
+  box-shadow: 0 4px 18px -4px color-mix(in srgb, var(--color-accent) 55%, transparent);
 }
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 10px; border: 2px solid var(--color-bg); }
-::-webkit-scrollbar-thumb:hover { background: var(--color-strong); }
+::-webkit-scrollbar-thumb { background: var(--color-strong); border-radius: 10px; border: 2px solid var(--color-bg); }
+::-webkit-scrollbar-thumb:hover { background: var(--color-muted); }
 
 .no-scrollbar { scrollbar-width: none; }
 .no-scrollbar::-webkit-scrollbar { display: none; }

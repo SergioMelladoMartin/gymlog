@@ -39,7 +39,7 @@ export default function Onboarding() {
       role="dialog"
       aria-modal="true"
     >
-      <div className="relative w-full max-w-md overflow-hidden rounded-3xl border border-border bg-card shadow-2xl">
+      <div className="glass-float relative w-full max-w-md overflow-hidden rounded-3xl">
         <button
           type="button"
           onClick={finish}
@@ -48,7 +48,7 @@ export default function Onboarding() {
           {t('onb.skip')}
         </button>
         <div className="flex flex-col items-center gap-4 px-6 pb-6 pt-12 text-center">
-          <div className="grid h-20 w-20 place-items-center rounded-full bg-accent/15 text-4xl">
+          <div className="grid h-20 w-20 place-items-center rounded-full border border-accent/30 bg-accent/15 text-4xl accent-glow">
             {s.emoji}
           </div>
           <h2 className="text-2xl font-semibold tracking-tight">{s.title}</h2>
@@ -67,7 +67,7 @@ export default function Onboarding() {
           <button
             type="button"
             onClick={() => (last ? finish() : setStep(step + 1))}
-            className="rounded-full bg-accent px-5 py-2 text-sm font-semibold text-ink transition hover:brightness-110"
+            className="btn-accent rounded-full px-5 py-2 text-sm"
           >
             {last ? t('onb.start') : t('onb.next')}
           </button>

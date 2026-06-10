@@ -40,7 +40,7 @@ export default function ExerciseList({ exercises, categories, initialCategory = 
 
   return (
     <div>
-      <div className="sticky top-[64px] z-20 -mx-4 bg-bg/80 px-4 pb-3 backdrop-blur-xl sm:top-[58px]">
+      <div className="glass-bar sticky top-[64px] z-20 -mx-4 px-4 pb-3 sm:top-[58px]">
         <div className="relative mb-2">
           <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" />

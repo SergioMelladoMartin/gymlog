@@ -73,7 +73,7 @@ export default function ExercisesView() {
             {categories.map((c) => {
               const n = countByCat.get(c.id) ?? 0;
               return (
-                <a key={c.id} href={`/exercises?group=${c.id}`} className="group relative flex items-center justify-between gap-3 rounded-2xl border border-border bg-card p-4 transition hover:-translate-y-0.5 hover:border-strong hover:shadow-lg">
+                <a key={c.id} href={`/exercises?group=${c.id}`} className="card group relative flex items-center justify-between gap-3 p-4 transition hover:-translate-y-0.5 hover:border-strong">
                   <div className="flex min-w-0 flex-col">
                     <span className="flex items-center gap-2">
                       <span className="h-2.5 w-2.5 rounded-full" style={{ background: c.color ?? '#888', boxShadow: `0 0 10px ${c.color ?? '#888'}55` }} />
@@ -172,7 +172,7 @@ function CreateExerciseModal({
       <form
         onSubmit={submit}
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md rounded-2xl border border-border bg-card p-5 shadow-2xl"
+        className="glass-float w-full max-w-md rounded-2xl p-5"
       >
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-lg font-semibold tracking-tight">Crear ejercicio</h2>
