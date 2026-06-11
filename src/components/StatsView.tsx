@@ -197,7 +197,7 @@ export default function StatsView() {
                 key={g}
                 type="button"
                 onClick={() => setGroupBy(g)}
-                className={`rounded-full px-3 py-1 transition ${groupBy === g ? 'bg-accent text-ink' : 'text-muted hover:text-fg'}`}
+                className={`rounded-full px-3 py-1 transition ${groupBy === g ? 'btn-accent' : 'text-muted hover:text-fg'}`}
               >
                 {g === 'week' ? 'Semana' : 'Mes'}
               </button>
@@ -211,7 +211,7 @@ export default function StatsView() {
               key={m.id}
               type="button"
               onClick={() => setTrendMetric(m.id)}
-              className={`shrink-0 rounded-full px-3 py-1 text-[11px] font-medium transition ${trendMetric === m.id ? 'bg-elevated text-fg ring-1 ring-accent/50' : 'bg-elevated/40 text-muted hover:text-fg'}`}
+              className={`shrink-0 rounded-full px-3 py-1 text-[11px] font-medium transition ${trendMetric === m.id ? 'btn-accent' : 'bg-elevated/50 text-muted hover:bg-elevated hover:text-fg'}`}
             >
               {m.label}
             </button>
@@ -232,7 +232,7 @@ export default function StatsView() {
 
       <div className="no-scrollbar mb-4 -mx-1 flex gap-1.5 overflow-x-auto px-1">
         {chips.map((c) => (
-          <a key={c.id} href={c.href} className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition ${c.match ? 'bg-accent text-ink' : 'bg-card text-muted hover:text-fg'}`}>{c.label}</a>
+          <a key={c.id} href={c.href} className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition ${c.match ? 'btn-accent' : 'border border-border bg-elevated/50 text-muted hover:bg-elevated hover:text-fg'}`}>{c.label}</a>
         ))}
       </div>
 

@@ -89,21 +89,21 @@ export default function CalendarView() {
       <div className="mb-4 flex items-center justify-between gap-3">
         {view === 'year' ? (
           <>
-            <a href={`/calendar?view=year&year=${year - 1}`} className="grid h-9 w-9 place-items-center rounded-lg border border-border bg-card text-muted transition hover:text-fg" aria-label="Año anterior">
+            <a href={`/calendar?view=year&year=${year - 1}`} className="grid h-9 w-9 place-items-center rounded-lg border border-border bg-elevated/60 text-muted transition hover:bg-elevated hover:text-fg" aria-label="Año anterior">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
             </a>
             <h1 className="text-xl font-semibold tracking-tight">{year}</h1>
-            <a href={`/calendar?view=year&year=${year + 1}`} className="grid h-9 w-9 place-items-center rounded-lg border border-border bg-card text-muted transition hover:text-fg" aria-label="Año siguiente">
+            <a href={`/calendar?view=year&year=${year + 1}`} className="grid h-9 w-9 place-items-center rounded-lg border border-border bg-elevated/60 text-muted transition hover:bg-elevated hover:text-fg" aria-label="Año siguiente">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
             </a>
           </>
         ) : (
           <>
-            <a href={`/calendar?year=${prevM.getFullYear()}&month=${prevM.getMonth() + 1}`} className="grid h-9 w-9 place-items-center rounded-lg border border-border bg-card text-muted transition hover:text-fg" aria-label="Mes anterior">
+            <a href={`/calendar?year=${prevM.getFullYear()}&month=${prevM.getMonth() + 1}`} className="grid h-9 w-9 place-items-center rounded-lg border border-border bg-elevated/60 text-muted transition hover:bg-elevated hover:text-fg" aria-label="Mes anterior">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
             </a>
             <h1 className="text-xl font-semibold capitalize tracking-tight">{monthName}</h1>
-            <a href={`/calendar?year=${nextM.getFullYear()}&month=${nextM.getMonth() + 1}`} className="grid h-9 w-9 place-items-center rounded-lg border border-border bg-card text-muted transition hover:text-fg" aria-label="Mes siguiente">
+            <a href={`/calendar?year=${nextM.getFullYear()}&month=${nextM.getMonth() + 1}`} className="grid h-9 w-9 place-items-center rounded-lg border border-border bg-elevated/60 text-muted transition hover:bg-elevated hover:text-fg" aria-label="Mes siguiente">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
             </a>
           </>
@@ -111,8 +111,8 @@ export default function CalendarView() {
       </div>
 
       <div className="mb-4 flex items-center justify-center gap-1 rounded-full border border-border bg-card p-1 text-xs font-medium">
-        <a href={`/calendar?year=${year}&month=${month}`} className={`rounded-full px-4 py-1.5 transition ${view === 'month' ? 'bg-accent text-ink' : 'text-muted hover:text-fg'}`}>Mes</a>
-        <a href={`/calendar?view=year&year=${year}`} className={`rounded-full px-4 py-1.5 transition ${view === 'year' ? 'bg-accent text-ink' : 'text-muted hover:text-fg'}`}>Año</a>
+        <a href={`/calendar?year=${year}&month=${month}`} className={`rounded-full px-4 py-1.5 transition ${view === 'month' ? 'btn-accent' : 'text-muted hover:text-fg'}`}>Mes</a>
+        <a href={`/calendar?view=year&year=${year}`} className={`rounded-full px-4 py-1.5 transition ${view === 'year' ? 'btn-accent' : 'text-muted hover:text-fg'}`}>Año</a>
       </div>
 
       <div className="mb-5 grid grid-cols-3 gap-2">

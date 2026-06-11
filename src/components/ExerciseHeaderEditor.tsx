@@ -66,7 +66,7 @@ export default function ExerciseHeaderEditor({
           <button
             type="button"
             onClick={() => setEditing(true)}
-            className="ml-1 grid h-7 w-7 place-items-center rounded-md border border-border bg-card text-muted transition hover:text-fg"
+            className="ml-1 grid h-7 w-7 place-items-center rounded-md border border-border bg-elevated/60 text-muted transition hover:bg-elevated hover:text-fg"
             aria-label="Editar ejercicio"
             title="Editar nombre y categoría"
           >
@@ -118,7 +118,7 @@ export default function ExerciseHeaderEditor({
       <button
         type="submit"
         disabled={!name.trim() || saving || deleting}
-        className="mt-3 w-full rounded-lg bg-accent py-2 text-sm font-semibold text-ink transition hover:brightness-110 disabled:opacity-40"
+        className="btn-accent mt-3 w-full rounded-lg py-2 text-sm disabled:opacity-40"
       >
         {saving ? 'Guardando…' : 'Guardar'}
       </button>

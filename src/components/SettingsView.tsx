@@ -201,7 +201,7 @@ export default function SettingsView() {
                   className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition ${
                     active
                       ? 'border-accent/60 bg-accent/15 text-fg'
-                      : 'border-border bg-elevated text-muted hover:border-strong hover:text-fg'
+                      : 'border-border bg-elevated/60 text-muted hover:border-strong hover:bg-elevated hover:text-fg'
                   }`}
                 >
                   {code === 'es' ? '🇪🇸 Español' : '🇬🇧 English'}
@@ -222,7 +222,7 @@ export default function SettingsView() {
               <button
                 type="button"
                 onClick={promptInstall}
-                className="flex w-full items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2.5 text-sm font-semibold text-ink transition hover:brightness-110"
+                className="btn-accent flex w-full items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm"
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -277,7 +277,7 @@ export default function SettingsView() {
           type="button"
           onClick={handleExport}
           disabled={exporting}
-          className="flex w-full items-center justify-center gap-2 rounded-lg border border-border bg-card px-4 py-2.5 text-sm font-medium transition hover:border-strong hover:bg-elevated disabled:opacity-40"
+          className="flex w-full items-center justify-center gap-2 rounded-lg border border-border bg-elevated/60 px-4 py-2.5 text-sm font-medium transition hover:border-strong hover:bg-elevated disabled:opacity-40"
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />

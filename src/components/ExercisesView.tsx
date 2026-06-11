@@ -58,7 +58,7 @@ export default function ExercisesView() {
           <button
             type="button"
             onClick={() => setCreatorOpen(true)}
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-accent px-3.5 py-2 text-xs font-semibold text-ink transition hover:brightness-110"
+            className="btn-accent inline-flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-2 text-xs"
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M12 5v14" /><path d="M5 12h14" /></svg>
             Crear ejercicio
@@ -212,14 +212,14 @@ function CreateExerciseModal({
           <button
             type="button"
             onClick={onClose}
-            className="flex-1 rounded-lg border border-border bg-card py-2.5 text-sm font-medium text-muted transition hover:text-fg"
+            className="flex-1 rounded-lg border border-border bg-elevated/60 py-2.5 text-sm font-medium text-muted transition hover:bg-elevated hover:text-fg"
           >
             Cancelar
           </button>
           <button
             type="submit"
             disabled={!name.trim() || !categoryId || submitting}
-            className="flex-[2] rounded-lg bg-accent py-2.5 text-sm font-semibold text-ink transition hover:brightness-110 disabled:opacity-40"
+            className="btn-accent flex-[2] rounded-lg py-2.5 text-sm disabled:opacity-40"
           >
             {submitting ? 'Creando…' : 'Crear y abrir'}
           </button>

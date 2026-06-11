@@ -50,7 +50,7 @@ export default function ExerciseList({ exercises, categories, initialCategory = 
             placeholder="Buscar ejercicio…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            className="w-full rounded-xl border border-border bg-card pl-9 pr-10 py-2.5 text-[15px] outline-none transition focus:border-accent/60"
+            className="w-full rounded-xl border border-border bg-elevated pl-9 pr-10 py-2.5 text-[15px] outline-none transition focus:border-accent/60"
           />
           {query && (
             <button
@@ -69,7 +69,7 @@ export default function ExerciseList({ exercises, categories, initialCategory = 
             type="button"
             onClick={() => setCatFilter(null)}
             className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition ${
-              catFilter === null ? 'bg-accent text-ink' : 'bg-card text-muted hover:text-fg'
+              catFilter === null ? 'btn-accent' : 'bg-elevated/60 text-muted hover:bg-elevated hover:text-fg'
             }`}
           >
             Todos <span className="ml-1 opacity-70">{exercises.length}</span>
@@ -84,7 +84,7 @@ export default function ExerciseList({ exercises, categories, initialCategory = 
                 onClick={() => setCatFilter(c.id === catFilter ? null : c.id)}
                 className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition ${active ? 'text-fg' : 'text-muted hover:text-fg'}`}
                 style={{
-                  background: active ? `${c.color}33` : 'var(--color-card)',
+                  background: active ? `${c.color}33` : 'var(--color-elevated)',
                   boxShadow: active ? `inset 0 0 0 1px ${c.color}80` : undefined,
                 }}
               >

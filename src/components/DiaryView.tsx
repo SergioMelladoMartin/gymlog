@@ -144,7 +144,7 @@ export default function DiaryView() {
           <h1 className="text-3xl font-semibold tracking-tight">Diario</h1>
         </div>
         {paged && (
-          <a href="/diary" className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium text-muted transition hover:text-fg">
+          <a href="/diary" className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border bg-elevated/60 px-3 py-1.5 text-xs font-medium text-muted transition hover:bg-elevated hover:text-fg">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m11 17-5-5 5-5" /><path d="m18 17-5-5 5-5" /></svg>
             Inicio
           </a>
@@ -206,18 +206,18 @@ export default function DiaryView() {
 
       <div className="mt-6 flex items-center justify-between gap-3">
         {hasNewer && newestDate ? (
-          <a href={`/diary?after=${newestDate}`} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-4 py-2 text-sm text-muted transition hover:text-fg">
+          <a href={`/diary?after=${newestDate}`} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-elevated/60 px-4 py-2 text-sm text-muted transition hover:bg-elevated hover:text-fg">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
             Más recientes
           </a>
         ) : paged ? (
-          <a href="/diary" className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-4 py-2 text-sm text-muted transition hover:text-fg">
+          <a href="/diary" className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-elevated/60 px-4 py-2 text-sm text-muted transition hover:bg-elevated hover:text-fg">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
             Volver al inicio
           </a>
         ) : <span />}
         {hasOlder && oldestDate && (
-          <a href={`/diary?before=${oldestDate}`} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-4 py-2 text-sm text-muted transition hover:text-fg">
+          <a href={`/diary?before=${oldestDate}`} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-elevated/60 px-4 py-2 text-sm text-muted transition hover:bg-elevated hover:text-fg">
             Más antiguos
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
           </a>

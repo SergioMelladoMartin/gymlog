@@ -124,7 +124,7 @@ export default function ProfileView() {
       )}
 
       <a href="/settings"
-        className="flex items-center justify-between rounded-xl border border-border bg-card px-4 py-3 text-sm font-medium transition hover:border-strong hover:bg-elevated">
+        className="card flex items-center justify-between px-4 py-3 text-sm font-medium transition hover:border-strong">
         <span className="flex items-center gap-2">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="12" cy="12" r="3" />

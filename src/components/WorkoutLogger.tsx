@@ -32,6 +32,9 @@ interface Props {
   categories: Category[];
   initialSets: TrainingSet[];
   initialComment: string | null;
+  /** Fired after every mutation with the fresh set list, so the parent
+   *  (DayView's header totals) can stay live without re-querying. */
+  onSetsChange?: (sets: TrainingSet[]) => void;
 }
 
 interface DraftSet {
@@ -39,7 +42,7 @@ interface DraftSet {
   reps: string;
 }
 
-export default function WorkoutLogger({ date, exercises: initialExercises, categories, initialSets, initialComment }: Props) {
+export default function WorkoutLogger({ date, exercises: initialExercises, categories, initialSets, initialComment, onSetsChange }: Props) {
   const { t, lang } = useT();
   const [exercises, setExercises] = useState<Exercise[]>(initialExercises);
   const [sets, setSets] = useState<TrainingSet[]>(initialSets);
@@ -110,7 +113,9 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
   }, [comment, commentDirty, date]);
 
   function refreshSets() {
-    setSets(qGetSets(date) as TrainingSet[]);
+    const fresh = qGetSets(date) as TrainingSet[];
+    setSets(fresh);
+    onSetsChange?.(fresh);
   }
 
   function addSet(exerciseId: number, weight: number, reps: number) {
@@ -688,7 +693,7 @@ function ExercisePicker({
             <button
               type="button"
               onClick={() => { setStepCategory(null); setQuery(''); }}
-              className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-border bg-card text-muted transition hover:text-fg"
+              className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-border bg-elevated/60 text-muted transition hover:bg-elevated hover:text-fg"
               aria-label="Volver a grupos"
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
@@ -791,7 +796,7 @@ function ExercisePicker({
                 <button
                   type="button"
                   onClick={() => setCreatorOpen(true)}
-                  className="rounded-full bg-accent px-4 py-2 text-xs font-semibold text-ink transition hover:brightness-110"
+                  className="btn-accent rounded-full px-4 py-2 text-xs"
                 >
                   + Crear {isSearching && query.trim() ? `"${query.trim()}"` : 'nuevo ejercicio'}
                 </button>
@@ -808,7 +813,7 @@ function ExercisePicker({
             <button
               type="button"
               onClick={() => setCreatorOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium text-fg transition hover:border-strong hover:bg-elevated"
+              className="inline-flex items-center gap-1.5 rounded-full border border-border bg-elevated/60 px-3 py-1.5 text-xs font-medium text-fg transition hover:border-strong hover:bg-elevated"
             >
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M12 5v14" /><path d="M5 12h14" /></svg>
               Crear ejercicio
@@ -967,11 +972,11 @@ function EditWeightForm({
             className="w-full rounded-lg border border-border bg-bg px-3 py-2 text-base font-semibold tabular-nums outline-none focus:border-accent/60" />
         </label>
         <button type="submit" disabled={saving}
-          className="grid h-10 w-10 place-items-center rounded-lg bg-accent text-ink transition hover:brightness-110 disabled:opacity-40" aria-label={t('action.save')}>
+          className="btn-accent grid h-10 w-10 place-items-center rounded-lg disabled:opacity-40" aria-label={t('action.save')}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
         </button>
         <button type="button" onClick={onCancel}
-          className="grid h-10 w-10 place-items-center rounded-lg border border-border bg-card text-muted transition hover:text-fg" aria-label={t('action.cancel')}>
+          className="grid h-10 w-10 place-items-center rounded-lg border border-border bg-elevated/60 text-muted transition hover:bg-elevated hover:text-fg" aria-label={t('action.cancel')}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
         </button>
       </div>
@@ -979,7 +984,7 @@ function EditWeightForm({
         <button
           type="button"
           onClick={onDuplicate}
-          className="inline-flex items-center justify-center gap-1.5 self-start rounded-md border border-border bg-card px-2.5 py-1 text-[11px] font-medium text-muted transition hover:border-strong hover:text-fg"
+          className="inline-flex items-center justify-center gap-1.5 self-start rounded-md border border-border bg-elevated/50 px-2.5 py-1 text-[11px] font-medium text-muted transition hover:bg-elevated hover:text-fg"
         >
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
@@ -1034,11 +1039,11 @@ function EditCardioForm({
             className="w-full rounded-lg border border-border bg-bg px-3 py-2 text-base font-semibold tabular-nums outline-none focus:border-accent/60" />
         </label>
         <button type="submit" disabled={saving}
-          className="grid h-10 w-10 place-items-center rounded-lg bg-accent text-ink transition hover:brightness-110 disabled:opacity-40" aria-label={t('action.save')}>
+          className="btn-accent grid h-10 w-10 place-items-center rounded-lg disabled:opacity-40" aria-label={t('action.save')}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
         </button>
         <button type="button" onClick={onCancel}
-          className="grid h-10 w-10 place-items-center rounded-lg border border-border bg-card text-muted transition hover:text-fg" aria-label={t('action.cancel')}>
+          className="grid h-10 w-10 place-items-center rounded-lg border border-border bg-elevated/60 text-muted transition hover:bg-elevated hover:text-fg" aria-label={t('action.cancel')}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
         </button>
       </div>
@@ -1046,7 +1051,7 @@ function EditCardioForm({
         <button
           type="button"
           onClick={onDuplicate}
-          className="inline-flex items-center justify-center gap-1.5 self-start rounded-md border border-border bg-card px-2.5 py-1 text-[11px] font-medium text-muted transition hover:border-strong hover:text-fg"
+          className="inline-flex items-center justify-center gap-1.5 self-start rounded-md border border-border bg-elevated/50 px-2.5 py-1 text-[11px] font-medium text-muted transition hover:bg-elevated hover:text-fg"
         >
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
@@ -1207,7 +1212,7 @@ function CreateExerciseForm({
       <button
         type="submit"
         disabled={!name.trim() || !categoryId || submitting}
-        className="mt-3 w-full rounded-lg bg-accent py-2 text-sm font-semibold text-ink transition hover:brightness-110 disabled:opacity-40"
+        className="btn-accent mt-3 w-full rounded-lg py-2 text-sm disabled:opacity-40"
       >
         {submitting ? 'Creando…' : 'Crear y seleccionar'}
       </button>
