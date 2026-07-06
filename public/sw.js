@@ -29,6 +29,8 @@ const SHELL_URLS = [
   '/profile',
   '/manifest.webmanifest',
   '/favicon.svg',
+  '/icons/icon-192.png',
+  '/icons/icon-512.png',
 ];
 
 self.addEventListener('install', (event) => {
