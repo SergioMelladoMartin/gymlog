@@ -34,6 +34,29 @@ function writeStoredMeta(meta: RemoteMeta | null) {
   } catch {}
 }
 
+/** True when Drive's copy differs from what we last synced locally. */
+function isRemoteNewer(remote: RemoteMeta, stored: RemoteMeta | null): boolean {
+  if (!stored) return true;
+  return stored.modifiedTime !== remote.modifiedTime || stored.size !== remote.size;
+}
+
+/** Persist a remote blob, update the sync watermark, and optionally hot-swap
+ *  the in-memory DB (when the app is already running). */
+async function applyRemoteBytes(bytes: Uint8Array, meta: RemoteMeta, hotSwap: boolean): Promise<void> {
+  await opfsWrite(bytes);
+  writeStoredMeta(meta);
+  setPending(false);
+  dirty = false;
+  setLastSyncAt(Date.now());
+  if (hotSwap && db) {
+    db.close();
+    db = openFromBytes(bytes);
+    db.exec('PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;');
+    migrateSchema(db);
+    window.dispatchEvent(new CustomEvent('gymlog:db-swapped'));
+  }
+}
+
 type DbStatus = 'idle' | 'loading' | 'ready' | 'error' | 'empty';
 
 let sqlite3: Sqlite3Static | null = null;
@@ -469,31 +492,9 @@ export async function loadDatabase(options: { seedUrl?: string } = {}): Promise<
     // 1. Prefer a copy already in OPFS (fastest startup).
     let bytes = await opfsRead();
 
-    // 1b. SELF-HEAL: if a previous session exited with `pending=true`
-    //     (we marked the DB dirty but Drive never confirmed the push),
-    //     the OPFS copy is the source of truth. Push it BEFORE checking
-    //     remote, otherwise the remote-newer check below would happily
-    //     overwrite our local changes with whatever Drive last had.
-    if (bytes && isPending() && isSignedIn()) {
-      try {
-        const meta = await pushBlobToDrive(bytes);
-        writeStoredMeta({ modifiedTime: meta.modifiedTime, size: meta.size });
-        setLastSyncAt(Date.now());
-        setPending(false);
-        console.log('[sync] self-heal: pushed pending OPFS bytes to Drive');
-      } catch (e) {
-        console.error('[sync] self-heal push failed; will retry later', e);
-        // Keep the pending flag set so the next online/visibility event
-        // tries again. Skip the remote-newer check below (we don't want
-        // to clobber our unpushed changes with a possibly older Drive
-        // copy).
-      }
-    }
-
-    // 2. If signed in, check Drive. Prefer the remote copy when it is newer
-    //    than what we have cached locally — otherwise changes made on another
-    //    device (e.g. the phone) would never show up until OPFS is wiped.
-    //    Skipped while pending: those bytes are not safe to overwrite yet.
+    // 2. If signed in, reconcile with Drive. Remote-first: a stuck `pending`
+    //    flag on stale local data must NOT block pulling newer phone edits,
+    //    and must NOT push old OPFS bytes over a fresher Drive copy.
     //
     //    We track whether the Drive read actually SUCCEEDED (vs. threw on a
     //    flaky network / expired token). This matters for the no-local-copy
@@ -502,7 +503,7 @@ export async function loadDatabase(options: { seedUrl?: string } = {}): Promise<
     //    must NOT be mistaken for "Drive is empty".
     let remoteReadFailed = false;
     let remoteFileExists = false;
-    if (isSignedIn() && !isPending()) {
+    if (isSignedIn()) {
       let meta: Awaited<ReturnType<typeof getRemoteMeta>> | null = null;
       try {
         meta = await getRemoteMeta();
@@ -513,8 +514,7 @@ export async function loadDatabase(options: { seedUrl?: string } = {}): Promise<
       if (meta) {
         remoteFileExists = true;
         const stored = readStoredMeta();
-        const isNewer = !stored || stored.modifiedTime !== meta.modifiedTime || stored.size !== meta.size;
-        if (!bytes || isNewer) {
+        if (!bytes || isRemoteNewer(meta, stored)) {
           let remote: ArrayBuffer | null = null;
           try {
             remote = await pullBlobFromDrive();
@@ -524,14 +524,39 @@ export async function loadDatabase(options: { seedUrl?: string } = {}): Promise<
           }
           if (remote) {
             bytes = new Uint8Array(remote);
-            await opfsWrite(bytes);
-            writeStoredMeta(meta);
+            await applyRemoteBytes(bytes, meta, false);
+            console.log('[sync] pulled newer remote copy on load');
           } else if (!bytes) {
             // Drive has a file but we couldn't download it and have nothing
             // local to fall back on → recoverable error, not "empty".
             remoteReadFailed = true;
           }
+        } else if (isPending() && bytes) {
+          // Remote unchanged since our last sync — safe to self-heal a push.
+          try {
+            const pushMeta = await pushBlobToDrive(bytes);
+            writeStoredMeta({ modifiedTime: pushMeta.modifiedTime, size: pushMeta.size });
+            setLastSyncAt(Date.now());
+            setPending(false);
+            console.log('[sync] self-heal: pushed pending OPFS bytes to Drive');
+          } catch (e) {
+            console.error('[sync] self-heal push failed; will retry later', e);
+          }
         }
+      } else if (!remoteReadFailed && isPending() && bytes) {
+        // No remote file yet — seed Drive from the local pending copy.
+        try {
+          const pushMeta = await pushBlobToDrive(bytes);
+          writeStoredMeta({ modifiedTime: pushMeta.modifiedTime, size: pushMeta.size });
+          setLastSyncAt(Date.now());
+          setPending(false);
+          console.log('[sync] self-heal: seeded Drive from pending OPFS');
+        } catch (e) {
+          console.error('[sync] self-heal push failed; will retry later', e);
+        }
+      } else if (remoteReadFailed && isPending() && bytes) {
+        // Can't tell whether remote is newer — refuse to push stale bytes.
+        console.warn('[sync] remote unreadable with pending local — skipping self-heal push');
       }
     }
 
@@ -768,6 +793,19 @@ export function markDirty() {
 async function flushToDrive(): Promise<void> {
   if (!db || !dirty) return;
   if (inFlight) return inFlight;
+
+  // Another device may have pushed while we were offline. Pull first so we
+  // never overwrite a fresher Drive copy with stale local bytes.
+  if (isSignedIn()) {
+    const meta = await getRemoteMeta().catch(() => null);
+    if (meta && isRemoteNewer(meta, readStoredMeta())) {
+      const pulled = await pullRemoteIfNewer();
+      if (pulled) return;
+      setSyncState('error');
+      return;
+    }
+  }
+
   // NOTE: deliberately *not* bailing on `!isSignedIn()`. The Google access
   // token expires every hour; once it's gone, isSignedIn() returns false
   // and the flush would silently drop the upload, leaving the user stuck
@@ -818,27 +856,25 @@ async function flushToDrive(): Promise<void> {
  */
 async function pullRemoteIfNewer(): Promise<boolean> {
   if (!db || !isSignedIn()) return false;
-  if (dirty || inFlight) return false;
+  if (inFlight) return false;
   const meta = await getRemoteMeta().catch(() => null);
   if (!meta) return false;
-  const stored = readStoredMeta();
-  if (stored && stored.modifiedTime === meta.modifiedTime && stored.size === meta.size) return false;
+  if (!isRemoteNewer(meta, readStoredMeta())) return false;
+  // Remote is genuinely newer — pull even if dirty/pending. A stuck pending
+  // flag on stale local data must not block receiving phone edits.
   const buf = await pullBlobFromDrive().catch(() => null);
   if (!buf) return false;
-  const bytes = new Uint8Array(buf);
-  await opfsWrite(bytes);
-  db.close();
-  db = openFromBytes(bytes);
-  db.exec('PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;');
-  migrateSchema(db);
-  writeStoredMeta(meta);
-  window.dispatchEvent(new CustomEvent('gymlog:db-swapped'));
+  await applyRemoteBytes(new Uint8Array(buf), meta, true);
+  setSyncState('idle');
   return true;
 }
 
 export async function checkForRemoteUpdates(): Promise<boolean> {
-  if (dirty) { try { await flushToDrive(); } catch {} }
-  return pullRemoteIfNewer();
+  if (await pullRemoteIfNewer()) return true;
+  if (dirty || isPending()) {
+    try { await flushToDrive(); } catch {}
+  }
+  return false;
 }
 
 export async function scheduleSync(immediate = false): Promise<void> {
@@ -871,6 +907,18 @@ export async function flushNow(): Promise<void> {
  *  third-party cookies), this is also our chance to prompt the user
  *  interactively from inside their gesture. */
 export async function forceSync(): Promise<void> {
+  // Remote-first: if another device pushed since our last sync, pull it and
+  // skip pushing — otherwise we'd clobber their edits with stale local data.
+  try {
+    const meta = await getRemoteMeta();
+    if (meta && isRemoteNewer(meta, readStoredMeta())) {
+      await pullRemoteIfNewer();
+      return;
+    }
+  } catch (e) {
+    console.error('[forceSync] remote check failed', e);
+  }
+
   if (dirty || isPending()) {
     try {
       await flushNow();
@@ -892,10 +940,11 @@ export async function forceSync(): Promise<void> {
 }
 
 if (typeof window !== 'undefined') {
-  const drainPending = () => {
-    if (!isPending() || inFlight) return;
-    dirty = true;
-    void flushToDrive().catch(() => {});
+  /** Pull remote updates first; only push local pending edits when Drive
+   *  hasn't moved ahead (see checkForRemoteUpdates). */
+  const reconcileSync = () => {
+    if (inFlight) return;
+    void checkForRemoteUpdates().catch(() => {});
   };
 
   // Page is being torn down — last chance to push. Async fetch may not
@@ -915,24 +964,20 @@ if (typeof window !== 'undefined') {
       // was unreachable, retry now that we're foregrounded. Otherwise finish
       // any pending upload and check whether another device pushed an update.
       if (status === 'error') { retryLoad(); return; }
-      drainPending();
-      checkForRemoteUpdates().catch(() => {});
+      reconcileSync();
     }
   });
 
-  // Network came back — retry a stalled load first, else drain pending
-  // immediately rather than waiting for the next visibility event.
+  // Network came back — retry a stalled load first, else reconcile.
   window.addEventListener('online', () => {
     if (status === 'error') { retryLoad(); return; }
-    drainPending();
+    reconcileSync();
   });
 
-  // Background poll: every 2 minutes while foreground, check remote AND
-  // try to drain pending in case a previous push silently failed.
+  // Background poll: every 2 minutes while foreground, reconcile with Drive.
   setInterval(() => {
     if (document.visibilityState !== 'visible') return;
-    drainPending();
-    checkForRemoteUpdates().catch(() => {});
+    reconcileSync();
   }, 120_000);
 }
 
