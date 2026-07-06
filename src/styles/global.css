@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "@fontsource-variable/inter/index.css";
 
 /* ─────────────────────────────────────────────────────────────────────────
    Design system · "liquid glass"
@@ -14,7 +15,7 @@
    the blur something colourful to refract.
    ──────────────────────────────────────────────────────────────────────── */
 @theme {
-  --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-sans: 'Inter Variable', 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 
   /* Dark theme = these defaults. Deep, slightly cool base so the glass
      layers above it read clearly. */
@@ -93,6 +94,38 @@
     radial-gradient(1000px 750px at 50% 118%, rgba(56, 189, 248, 0.18), transparent 62%);
 }
 
+:root[data-theme='amoled'] {
+  color-scheme: dark;
+
+  --color-bg: #000000;
+  --color-fg: #f2f2f6;
+  --color-card: rgba(12, 12, 16, 0.88);
+  --color-elevated: rgba(22, 22, 28, 0.92);
+  --color-border: rgba(255, 255, 255, 0.07);
+  --color-strong: rgba(255, 255, 255, 0.18);
+  --color-muted: #8a8a96;
+  --color-subtle: #a4a4b0;
+  --color-accent: #a3e635;
+  --color-ink: #0a1400;
+  --color-accent-soft: rgba(163, 230, 53, 0.12);
+  --color-danger: #ef4444;
+  --color-success: #10b981;
+
+  --glass-blur: 16px;
+  --glass-saturate: 1.35;
+  --glass-highlight: rgba(255, 255, 255, 0.05);
+  --shadow-glass:
+    inset 0 1px 0 var(--glass-highlight),
+    0 10px 32px -14px rgba(0, 0, 0, 0.85);
+  --shadow-float:
+    inset 0 1px 0 var(--glass-highlight),
+    0 24px 60px -18px rgba(0, 0, 0, 0.9);
+
+  --aurora:
+    radial-gradient(900px 600px at 85% -15%, color-mix(in srgb, var(--color-accent) 18%, transparent), transparent 64%),
+    radial-gradient(700px 500px at -15% 20%, rgba(124, 92, 255, 0.12), transparent 62%);
+}
+
 /* Accent variants — override lime with the selected colour via data-accent.
    `--color-ink` stays dark enough to read on the bg colour (WCAG AA for
    buttons / badges). Applied on top of any theme. The aurora picks the new
@@ -129,9 +162,14 @@
    user explicitly asks the OS for less transparency. */
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   :root,
-  :root[data-theme='dark'] {
+  :root[data-theme='dark'],
+  :root[data-theme='amoled'] {
     --color-card: #1d1d27;
     --color-elevated: #2c2c39;
+  }
+  :root[data-theme='amoled'] {
+    --color-card: #0c0c10;
+    --color-elevated: #16161c;
   }
   :root[data-theme='light'] {
     --color-card: #ffffff;
@@ -140,10 +178,15 @@
 }
 @media (prefers-reduced-transparency: reduce) {
   :root,
-  :root[data-theme='dark'] {
+  :root[data-theme='dark'],
+  :root[data-theme='amoled'] {
     --color-card: #1d1d27;
     --color-elevated: #2c2c39;
     --glass-blur: 0px;
+  }
+  :root[data-theme='amoled'] {
+    --color-card: #0c0c10;
+    --color-elevated: #16161c;
   }
   :root[data-theme='light'] {
     --color-card: #ffffff;
@@ -432,4 +475,38 @@ main astro-island:empty::after {
 }
 @media (prefers-reduced-motion: reduce) {
   main astro-island:empty::after { animation: nav-spinner-in 0.2s ease 0.15s forwards; }
+}
+
+/* ── Skeleton loaders ─────────────────────────────────────────────────── */
+@keyframes skeleton-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.skeleton-bone {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--color-elevated) 100%, transparent) 0%,
+    color-mix(in srgb, var(--color-strong) 35%, var(--color-elevated)) 50%,
+    color-mix(in srgb, var(--color-elevated) 100%, transparent) 100%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-bone { animation: none; }
+}
+
+/* ── Empty state entrance ─────────────────────────────────────────────── */
+@keyframes empty-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.empty-state {
+  animation: empty-in 320ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.empty-state-icon {
+  animation: empty-in 420ms cubic-bezier(0.2, 0.8, 0.2, 1) 60ms both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .empty-state, .empty-state-icon { animation: none; }
 }

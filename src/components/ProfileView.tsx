@@ -3,7 +3,8 @@ import { getCurrentUser, type UserProfile } from '../lib/auth';
 import { getDb } from '../lib/sqlite';
 import { getWeeklyStreak } from '../lib/queries';
 import { useDatabase } from '../hooks/useDatabase';
-import { useT } from '../hooks/useT';
+import { useLocale } from '../hooks/useLocale';
+import { ProfileSkeleton } from './Skeleton';
 
 interface Stats {
   totalSets: number;
@@ -15,7 +16,7 @@ interface Stats {
 }
 
 export default function ProfileView() {
-  const { t, lang } = useT();
+  const { t, fmt, fmtDate } = useLocale();
   const ready = useDatabase();
   const [user, setUser] = useState<UserProfile | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
@@ -47,18 +48,10 @@ export default function ProfileView() {
     setStreak(getWeeklyStreak());
   }, [ready]);
 
-  if (!ready) {
-    return (
-      <div className="flex min-h-[40vh] items-center justify-center text-muted">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-border border-t-accent" />
-      </div>
-    );
-  }
+  if (!ready) return <ProfileSkeleton />;
 
-  const locale = lang === 'en' ? 'en-US' : 'es-ES';
-  const fmt = (n: number) => Math.round(n).toLocaleString(locale);
   const prettyDate = (iso: string | null) =>
-    iso ? new Date(iso + 'T00:00:00').toLocaleDateString(locale, { day: 'numeric', month: 'long', year: 'numeric' }) : '—';
+    iso ? fmtDate(iso, { day: 'numeric', month: 'long', year: 'numeric' }) : '—';
 
   return (
     <>
@@ -85,7 +78,7 @@ export default function ProfileView() {
         )}
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <div className="truncate text-xl font-semibold tracking-tight">{user?.name ?? 'Usuario'}</div>
+            <div className="truncate text-xl font-semibold tracking-tight">{user?.name ?? t('common.user')}</div>
             {streak > 0 && (
               <span
                 title={t('profile.streak')}
@@ -105,7 +98,7 @@ export default function ProfileView() {
           <Tile label={t('profile.days')} value={String(stats.totalDays)} />
           <Tile label={t('profile.sets')} value={fmt(stats.totalSets)} />
           <Tile label={t('profile.exercises')} value={String(stats.totalExercises)} />
-          <Tile label={t('profile.volume')} value={`${Math.round(stats.totalVolume / 1000)}k`} unit="kg" />
+          <Tile label={t('profile.volume')} value={`${Math.round(stats.totalVolume / 1000)}k`} unit={t('common.kg')} />
         </section>
       )}
 

@@ -160,7 +160,7 @@ export default function SideNav({ active }: Props) {
     };
   }, [open, isDesktop]);
 
-  const userName = user?.name ?? 'Usuario';
+  const userName = user?.name ?? t('common.user');
   const userEmail = user?.email ?? '';
   const initial = (userName || userEmail || '?').trim().charAt(0).toUpperCase();
 
@@ -225,7 +225,7 @@ export default function SideNav({ active }: Props) {
               type="button"
               onClick={() => setOpen(false)}
               className="grid h-8 w-8 place-items-center rounded-md text-muted transition hover:text-fg"
-              aria-label="Cerrar menú"
+              aria-label={t('action.closeMenu')}
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
             </button>
@@ -234,8 +234,8 @@ export default function SideNav({ active }: Props) {
             <button
               type="button"
               onClick={toggleCollapsed}
-              title="Replegar"
-              aria-label="Replegar barra"
+              title={t('action.collapseNav')}
+              aria-label={t('action.collapseNav')}
               className="grid h-8 w-8 place-items-center rounded-md text-muted transition hover:bg-elevated hover:text-fg"
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -250,8 +250,8 @@ export default function SideNav({ active }: Props) {
           <button
             type="button"
             onClick={toggleCollapsed}
-            title="Expandir"
-            aria-label="Expandir barra"
+            title={t('action.expandNav')}
+            aria-label={t('action.expandNav')}
             className="mx-auto mt-2 grid h-8 w-8 place-items-center rounded-md text-muted transition hover:bg-elevated hover:text-fg"
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

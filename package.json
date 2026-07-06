@@ -10,11 +10,13 @@
     "build": "astro build",
     "preview": "astro preview",
     "astro": "astro",
-    "export-json": "tsx scripts/export-to-json.ts"
+    "export-json": "tsx scripts/export-to-json.ts",
+    "generate-icons": "tsx scripts/generate-icons.ts"
   },
   "dependencies": {
     "@astrojs/react": "^5.0.3",
     "@astrojs/vercel": "^10.0.5",
+    "@fontsource-variable/inter": "^5.2.8",
     "@sqlite.org/sqlite-wasm": "^3.53.0-build1",
     "@tailwindcss/vite": "^4.2.4",
     "@types/react": "^19.2.14",
@@ -28,6 +30,7 @@
     "tailwindcss": "^4.2.4"
   },
   "devDependencies": {
+    "sharp": "^0.35.3",
     "tsx": "^4.21.0"
   }
 }

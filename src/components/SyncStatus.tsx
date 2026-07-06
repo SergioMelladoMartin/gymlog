@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { forceSync, getSyncInfo, onSyncChange, type SyncState } from '../lib/sqlite';
+import { hapticSuccess } from '../lib/haptics';
 import { useT } from '../hooks/useT';
 
 /**
@@ -15,6 +16,7 @@ export default function SyncStatus() {
   const [info, setInfo] = useState(() => getSyncInfo());
   const [online, setOnline] = useState(() => typeof navigator === 'undefined' ? true : navigator.onLine);
   const [, setTick] = useState(0);
+  const prevState = useRef<SyncState>(info.state);
 
   useEffect(() => onSyncChange(setInfo), []);
 
@@ -36,6 +38,13 @@ export default function SyncStatus() {
   }, []);
 
   const { state, lastSyncAt } = info;
+  useEffect(() => {
+    if (prevState.current === 'syncing' && state === 'idle' && online) {
+      hapticSuccess();
+    }
+    prevState.current = state;
+  }, [state, online]);
+
   const effState: SyncState = !online && state !== 'syncing' ? 'error' : state;
 
   let tone = 'text-muted';

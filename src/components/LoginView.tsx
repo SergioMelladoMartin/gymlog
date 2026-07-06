@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { isSignedIn, signIn } from '../lib/auth';
 import { importBytes, loadDatabase } from '../lib/sqlite';
+import { useT } from '../hooks/useT';
 
 export default function LoginView() {
+  const { t } = useT();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -27,7 +29,6 @@ export default function LoginView() {
     setErr(null);
     setBusy(true);
     try {
-      // Sign in first so the import immediately pushes the backup to Drive.
       if (!isSignedIn()) await signIn();
       const bytes = new Uint8Array(await file.arrayBuffer());
       await importBytes(bytes);
@@ -53,7 +54,7 @@ export default function LoginView() {
         </div>
         <h1 className="text-3xl font-semibold tracking-tight">gymlog</h1>
         <p className="mt-2 text-sm text-muted">
-          Tus entrenos en tu Google Drive. Sin servidor, sin base de datos, solo tú.
+          {t('login.tagline')}
         </p>
       </div>
 
@@ -69,12 +70,12 @@ export default function LoginView() {
           <path fill="#FBBC05" d="M5.83 14.09A6.62 6.62 0 0 1 5.47 12c0-.73.13-1.44.36-2.09V7.07H2.18a11 11 0 0 0 0 9.86l3.65-2.84z"/>
           <path fill="#EA4335" d="M12 5.38c1.62 0 3.07.56 4.22 1.64l3.15-3.15A11 11 0 0 0 12 1a11 11 0 0 0-9.82 6.07l3.65 2.84C6.7 7.32 9.13 5.38 12 5.38z"/>
         </svg>
-        {busy ? 'Conectando…' : 'Continuar con Google'}
+        {busy ? t('login.connecting') : t('login.google')}
       </button>
 
       <div className="my-2 flex items-center gap-3 text-xs uppercase tracking-wider text-muted">
         <span className="h-px flex-1 bg-border" />
-        o
+        {t('login.or')}
         <span className="h-px flex-1 bg-border" />
       </div>
 
@@ -84,7 +85,7 @@ export default function LoginView() {
           <polyline points="17 8 12 3 7 8" />
           <line x1="12" x2="12" y1="3" y2="15" />
         </svg>
-        Subir mi backup .fitnotes a Drive
+        {t('login.uploadCta')}
         <input
           type="file"
           accept=".fitnotes,.db,.sqlite,application/x-sqlite3"
@@ -103,8 +104,7 @@ export default function LoginView() {
       )}
 
       <p className="text-center text-[11px] text-muted">
-        Con Google: pedimos acceso <b>solo</b> a la carpeta oculta "appdata" de tu Drive.
-        Tus entrenos se guardan en un archivo <code>gymlog.fitnotes</code> compatible con la app FitNotes.
+        {t('login.privacy')}
       </p>
       </div>
     </div>

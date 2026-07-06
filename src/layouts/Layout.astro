@@ -4,6 +4,7 @@ import { ClientRouter, fade } from 'astro:transitions';
 import SideNav from '../components/SideNav';
 import SyncStatus from '../components/SyncStatus';
 import Onboarding from '../components/Onboarding';
+import NavTitle from '../components/NavTitle';
 
 interface Props {
   title?: string;
@@ -11,27 +12,15 @@ interface Props {
 }
 
 const { title = 'gymlog', activeNav = 'today' } = Astro.props;
-
-const navTitle = {
-  today: 'Hoy',
-  calendar: 'Calendario',
-  diary: 'Diario',
-  exercises: 'Ejercicios',
-  stats: 'Estadísticas',
-  login: 'Acceso',
-}[activeNav];
 ---
 <html lang="es">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#0f0f15" />
+    <meta name="theme-color" content="#0f0f15" id="meta-theme-color" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
-    <link rel="preconnect" href="https://rsms.me/" />
-    <!-- Font files load with CORS; that connection needs its own preconnect. -->
-    <link rel="preconnect" href="https://rsms.me/" crossorigin />
-    <link rel="stylesheet" href="https://rsms.me/inter/inter.css" />
     <title>{title}</title>
     <ClientRouter />
     <script is:inline data-astro-rerun>
@@ -39,7 +28,14 @@ const navTitle = {
         try {
           var stored = localStorage.getItem('theme');
           var sysDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-          document.documentElement.setAttribute('data-theme', stored || (sysDark ? 'dark' : 'light'));
+          var theme = stored || (sysDark ? 'dark' : 'light');
+          if (theme !== 'light' && theme !== 'amoled') theme = 'dark';
+          document.documentElement.setAttribute('data-theme', theme);
+          var themeColors = { dark: '#0f0f15', light: '#eef0f5', amoled: '#000000' };
+          var meta = document.getElementById('meta-theme-color');
+          if (meta) meta.setAttribute('content', themeColors[theme] || themeColors.dark);
+          var lang = localStorage.getItem('gymlog-lang');
+          if (lang === 'es' || lang === 'en') document.documentElement.setAttribute('lang', lang);
           var accent = localStorage.getItem('accent');
           if (accent && accent !== 'lime') document.documentElement.setAttribute('data-accent', accent);
           // Apply the persisted "collapsed sidebar" preference before paint.
@@ -122,7 +118,11 @@ const navTitle = {
               <path d="M6.404 12.768a2 2 0 1 1-2.829-2.829l1.768-1.767a2 2 0 1 1-2.828-2.829l2.828-2.828a2 2 0 1 1 2.829 2.828l1.767-1.768a2 2 0 1 1 2.829 2.829z" />
             </svg>
           </a>
-          <span class="truncate text-[15px] font-semibold tracking-tight">{navTitle}</span>
+          {activeNav !== 'login' ? (
+            <NavTitle client:load transition:persist="nav-title" active={activeNav} />
+          ) : (
+            <span class="truncate text-[15px] font-semibold tracking-tight">gymlog</span>
+          )}
         </div>
         {activeNav !== 'login' && <SyncStatus client:only="react" transition:persist="sync-status" />}
       </div>

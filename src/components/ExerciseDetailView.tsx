@@ -10,7 +10,9 @@ import {
   type TrainingSetEx,
 } from '../lib/queries';
 import type { Category } from '../lib/types';
+import { useLocale } from '../hooks/useLocale';
 import ExerciseHeaderEditor from './ExerciseHeaderEditor';
+import { ChartSkeleton, GenericSkeleton } from './Skeleton';
 
 // recharts is ~250 KB — by far the heaviest dependency in the app. Loading it
 // lazily lets the rest of this screen (header, stat tiles, full set history)
@@ -18,14 +20,13 @@ import ExerciseHeaderEditor from './ExerciseHeaderEditor';
 // its place instead of blocking the whole page mount.
 const ExerciseChart = lazy(() => import('./ExerciseChart'));
 
-function formatDate(iso: string) {
-  return new Date(iso + 'T00:00:00').toLocaleDateString('es-ES', {
-    weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
-  });
+function formatDate(iso: string, fmtDate: (iso: string, o: Intl.DateTimeFormatOptions) => string) {
+  return fmtDate(iso, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 export default function ExerciseDetailView() {
   const ready = useDatabase();
+  const { t, fmtDate } = useLocale();
   const id = typeof window !== 'undefined'
     ? Number(new URL(window.location.href).searchParams.get('id') ?? 0)
     : 0;
@@ -45,7 +46,7 @@ export default function ExerciseDetailView() {
     setCategories(getCategories());
   }, [ready, id]);
 
-  if (!ready) return <div className="flex min-h-[50vh] items-center justify-center text-muted"><div className="h-8 w-8 animate-spin rounded-full border-2 border-border border-t-accent" /></div>;
+  if (!ready) return <GenericSkeleton />;
   if (notFound) { if (typeof window !== 'undefined') window.location.replace('/exercises'); return null; }
   if (!exercise) return null;
 
@@ -72,7 +73,7 @@ export default function ExerciseDetailView() {
       <div className="mb-5">
         <a href="/exercises" className="mb-2 inline-flex items-center gap-1 text-sm text-muted transition hover:text-fg">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
-          Ejercicios
+          {t('nav.exercises')}
         </a>
         <ExerciseHeaderEditor
           exerciseId={exercise.id}
@@ -85,21 +86,21 @@ export default function ExerciseDetailView() {
       </div>
 
       <div className="mb-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <Tile label="Sesiones" value={String(totalSessions)} />
-        <Tile label="Sets" value={String(totalSets)} />
-        <Tile label="Top peso" value={String(heaviest)} unit="kg" sub={bestSet ? `${bestSet.weight_kg} × ${bestSet.reps}` : undefined} />
-        <Tile label="1RM est." value={String(Math.round(best1RM * 10) / 10)} unit="kg" accent />
+        <Tile label={t('exercise.sessions')} value={String(totalSessions)} />
+        <Tile label={t('workout.sets')} value={String(totalSets)} />
+        <Tile label={t('exercise.topWeight')} value={String(heaviest)} unit={t('common.kg')} sub={bestSet ? `${bestSet.weight_kg} × ${bestSet.reps}` : undefined} />
+        <Tile label={t('exercise.est1rm')} value={String(Math.round(best1RM * 10) / 10)} unit={t('common.kg')} accent />
       </div>
 
       <div className="card mb-5 p-4">
-        <div className="section-title mb-3">Progresión</div>
-        <Suspense fallback={<div className="grid h-[220px] place-items-center"><div className="h-7 w-7 animate-spin rounded-full border-2 border-border border-t-accent" /></div>}>
+        <div className="section-title mb-3">{t('exercise.progression')}</div>
+        <Suspense fallback={<ChartSkeleton />}>
           <ExerciseChart data={sessions} />
         </Suspense>
       </div>
 
       <div className="card p-4">
-        <div className="section-title mb-3">Historial</div>
+        <div className="section-title mb-3">{t('exercise.history')}</div>
         <div className="flex flex-col divide-y divide-border">
           {[...historyByDate.entries()].map(([date, sets]) => {
             // Highlight the heaviest set of the day so the user spots it

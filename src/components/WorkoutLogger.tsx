@@ -12,11 +12,9 @@ import {
   setWorkoutComment as qSetComment,
   updateSet as qUpdateSet,
 } from '../lib/queries';
-import { useT } from '../hooks/useT';
-
-function vibrate(pattern: number | number[]) {
-  try { if ('vibrate' in navigator) navigator.vibrate(pattern); } catch {}
-}
+import { useLocale } from '../hooks/useLocale';
+import { hapticLight, hapticDelete, hapticPr, hapticMedium } from '../lib/haptics';
+import EmptyState from './EmptyState';
 
 // Runtime set shape used by the logger — extended query type with PR flags
 // and the legacy `is_personal_record` for backwards compat with the UI.
@@ -43,7 +41,7 @@ interface DraftSet {
 }
 
 export default function WorkoutLogger({ date, exercises: initialExercises, categories, initialSets, initialComment, onSetsChange }: Props) {
-  const { t, lang } = useT();
+  const { t, fmt, fmtDate } = useLocale();
   const [exercises, setExercises] = useState<Exercise[]>(initialExercises);
   const [sets, setSets] = useState<TrainingSet[]>(initialSets);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -124,8 +122,8 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
     setPendingExerciseIds((prev) => prev.filter((id) => id !== exerciseId));
     setLastSetAt(Date.now());
     // Light tap on save, stronger triple-buzz if we just set a PR.
-    if (result?.pr_weight || result?.pr_reps) vibrate([20, 40, 20, 40, 40]);
-    else vibrate(10);
+    if (result?.pr_weight || result?.pr_reps) hapticPr();
+    else hapticLight();
   }
 
   function addCardioSet(exerciseId: number, durationSec: number, distanceM: number) {
@@ -140,7 +138,7 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
     refreshSets();
     setPendingExerciseIds((prev) => prev.filter((id) => id !== exerciseId));
     setLastSetAt(Date.now());
-    vibrate(10);
+    hapticLight();
   }
 
   function duplicateSet(setId: number) {
@@ -148,12 +146,13 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
     refreshSets();
     setEditingSetId(null);
     setLastSetAt(Date.now());
-    vibrate(10);
+    hapticMedium();
   }
 
   function deleteSet(id: number) {
     qDeleteSet(id);
     refreshSets();
+    hapticDelete();
   }
 
   function updateSet(
@@ -199,7 +198,7 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
       setExercises((prev) => [...prev, ex]);
       return ex;
     } catch (e: any) {
-      alert(e?.message ?? 'Error al crear ejercicio');
+      alert(e?.message ?? t('common.errorCreateExercise'));
       return null;
     }
   }
@@ -226,7 +225,7 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
     try {
       qCopySets(lastTrainingDate, date);
       refreshSets();
-      vibrate(10);
+      hapticLight();
     } catch (e) {
       console.error('[copyLastWorkout]', e);
     } finally {
@@ -234,7 +233,6 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
     }
   }
 
-  const locale = lang === 'en' ? 'en-US' : 'es-ES';
   const restSecs = lastSetAt ? Math.floor((Date.now() - lastSetAt) / 1000) : 0;
 
   // PR summary for today
@@ -278,16 +276,15 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
       </button>
 
       {allCards.length === 0 ? (
-        <div className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border bg-card/40 px-4 py-10 text-center">
-          <div className="text-base font-semibold tracking-tight">{t('workout.noExercisesTitle')}</div>
-          <div className="text-sm text-muted">{t('workout.noExercisesBody')}</div>
-          {lastTrainingDate && (
+        <EmptyState
+          variant="workout"
+          action={lastTrainingDate ? (
             <>
               <button
                 type="button"
                 onClick={copyLastWorkout}
                 disabled={copying}
-                className="btn-accent mt-3 inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm disabled:opacity-50"
+                className="btn-accent mt-1 inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm disabled:opacity-50"
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
@@ -297,12 +294,12 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
               </button>
               <div className="text-[11px] text-muted">
                 {t('workout.copyYesterdayHint', {
-                  date: new Date(lastTrainingDate + 'T00:00:00').toLocaleDateString(locale, { weekday: 'short', day: 'numeric', month: 'short' }),
+                  date: fmtDate(lastTrainingDate, { weekday: 'short', day: 'numeric', month: 'short' }),
                 })}
               </div>
             </>
-          )}
-        </div>
+          ) : undefined}
+        />
       ) : (
         <div className="flex flex-col gap-3">
           {allCards.map(({ exerciseId, sets: exSets }) => {
@@ -333,7 +330,7 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
                       ? t('workout.noSetsYet')
                       : `${exSets.length} ${exSets.length === 1 ? t('workout.serie') : t('workout.series')}${cardio
                           ? `${totalDuration ? ` · ${formatDuration(totalDuration)}` : ''}${totalDistance > 0 ? ` · ${formatDistance(totalDistance)}` : ''}`
-                          : ` · ${Math.round(totalVol).toLocaleString('es-ES')} kg`}`}
+                          : ` · ${fmt(totalVol)} ${t('common.kg')}`}`}
                   </span>
                 </header>
 
@@ -344,7 +341,7 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
                       <span>
                         {cardio
                           ? `${formatDuration(totalDuration)}${totalDistance > 0 ? ` · ${formatDistance(totalDistance)}` : ''}`
-                          : `${Math.round(totalVol).toLocaleString('es-ES')} kg`}
+                          : `${fmt(totalVol)} ${t('common.kg')}`}
                       </span>
                     </div>
 
@@ -694,7 +691,7 @@ function ExercisePicker({
               type="button"
               onClick={() => { setStepCategory(null); setQuery(''); }}
               className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-border bg-elevated/60 text-muted transition hover:bg-elevated hover:text-fg"
-              aria-label="Volver a grupos"
+              aria-label={t('exercises.backGroups')}
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
             </button>
@@ -703,7 +700,7 @@ function ExercisePicker({
             <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>
             <input
               autoFocus
-              placeholder={activeCategory ? `Buscar en ${activeCategory.name}…` : 'Buscar ejercicio…'}
+              placeholder={activeCategory ? t('exercises.searchInGroup', { name: activeCategory.name }) : t('exercises.searchPlaceholder')}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               className="w-full rounded-xl border border-border bg-elevated pl-9 pr-3 py-2.5 outline-none transition focus:border-accent/60"
@@ -723,7 +720,7 @@ function ExercisePicker({
           <div className="mt-3 flex items-center gap-2">
             <span className="h-2.5 w-2.5 rounded-full" style={{ background: activeCategory.color ?? '#888' }} />
             <h2 className="text-lg font-semibold tracking-tight">{activeCategory.name}</h2>
-            <span className="text-xs text-muted">· {countByCat.get(activeCategory.id) ?? 0} ejercicios</span>
+            <span className="text-xs text-muted">· {t('exercises.count', { n: countByCat.get(activeCategory.id) ?? 0 })}</span>
           </div>
         )}
 
@@ -746,7 +743,7 @@ function ExercisePicker({
         {/* Body: groups index OR exercise list */}
         {showGroupsIndex ? (
           <div className="mt-3 flex-1 overflow-y-auto">
-            <div className="mb-2 text-xs text-muted">Elige un grupo muscular</div>
+            <div className="mb-2 text-xs text-muted">{t('exercises.pickGroupShort')}</div>
             <div className="grid grid-cols-2 gap-2">
               {categories.map((c) => {
                 const n = countByCat.get(c.id) ?? 0;
@@ -792,7 +789,11 @@ function ExercisePicker({
             ))}
             {visibleExercises.length === 0 && (
               <li className="flex flex-col items-center justify-center gap-3 py-10 text-center text-sm text-muted">
-                <span>{isSearching ? `Sin resultados para "${query}"` : 'Este grupo aún no tiene ejercicios'}</span>
+                <EmptyState
+                  variant={isSearching ? 'search' : 'exercises'}
+                  title={isSearching ? undefined : t('exercises.emptyGroup')}
+                  body={isSearching ? t('exercises.noResults', { query }) : undefined}
+                />
                 <button
                   type="button"
                   onClick={() => setCreatorOpen(true)}
@@ -909,8 +910,8 @@ function SetRow({
           type="button"
           onClick={onStartEdit}
           className="grid h-8 w-8 place-items-center rounded-md text-muted opacity-100 transition hover:bg-card hover:text-fg sm:opacity-0 sm:group-hover:opacity-100"
-          aria-label="Editar set"
-          title="Editar"
+          aria-label={t('action.edit')}
+          title={t('action.edit')}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
@@ -921,8 +922,8 @@ function SetRow({
           type="button"
           onClick={onDelete}
           className="grid h-8 w-8 place-items-center rounded-md text-muted opacity-100 transition hover:bg-danger/10 hover:text-danger sm:opacity-0 sm:group-hover:opacity-100"
-          aria-label="Eliminar set"
-          title="Eliminar"
+          aria-label={t('action.delete')}
+          title={t('action.delete')}
         >
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
         </button>
@@ -1162,6 +1163,7 @@ function CreateExerciseForm({
   onCancel: () => void;
   onCreate: (name: string, categoryId: number) => Promise<void> | void;
 }) {
+  const { t } = useLocale();
   const [name, setName] = useState(initialName);
   const [categoryId, setCategoryId] = useState<number | null>(initialCategoryId);
   const [submitting, setSubmitting] = useState(false);
@@ -1177,16 +1179,16 @@ function CreateExerciseForm({
   return (
     <form onSubmit={submit} className="mt-3 rounded-xl border border-accent/40 bg-card p-3">
       <div className="mb-2 flex items-center justify-between">
-        <div className="section-title">Nuevo ejercicio</div>
+        <div className="section-title">{t('exercises.newExercise')}</div>
         <button type="button" onClick={onCancel} className="text-xs text-muted hover:text-fg">
-          Cancelar
+          {t('action.cancel')}
         </button>
       </div>
       <input
         autoFocus
         value={name}
         onChange={(e) => setName(e.target.value)}
-        placeholder="Ej: Press Inclinado (mancuernas)"
+        placeholder={t('exercises.createPlaceholder')}
         className="w-full rounded-lg border border-border bg-elevated px-3 py-2 text-sm outline-none transition focus:border-accent/60"
       />
       <div className="no-scrollbar -mx-1 mt-2 flex gap-1.5 overflow-x-auto px-1">
@@ -1214,23 +1216,23 @@ function CreateExerciseForm({
         disabled={!name.trim() || !categoryId || submitting}
         className="btn-accent mt-3 w-full rounded-lg py-2 text-sm disabled:opacity-40"
       >
-        {submitting ? 'Creando…' : 'Crear y seleccionar'}
+        {submitting ? t('action.creating') : t('exercises.createAndSelect')}
       </button>
     </form>
   );
 }
 
 function PrBadges({ set }: { set: TrainingSet }) {
+  const { t } = useLocale();
   const badges: Array<{ label: string; title: string; cls: string; icon: React.ReactNode }> = [];
-  // Pesa (dumbbell) — a new max weight was unlocked.
   if (set.pr_weight) badges.push({
-    label: 'W', title: 'Peso nuevo desbloqueado',
+    label: t('pr.weightLabel'), title: t('pr.weightTitle'),
     cls: 'bg-accent text-ink',
     icon: <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="m6.5 6.5 11 11"/><path d="m21 21-1-1"/><path d="m3 3 1 1"/><path d="m18 22 4-4"/><path d="m2 6 4-4"/><path d="m3 10 7-7"/><path d="m14 21 7-7"/></svg>,
   });
   // Copa (trophy) — more reps than ever at this weight or heavier.
   if (set.pr_reps) badges.push({
-    label: 'R', title: 'Récord de repeticiones',
+    label: t('pr.repsLabel'), title: t('pr.repsTitle'),
     cls: 'bg-accent text-ink',
     icon: <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M7.5 2h9l1.5 3h3.5l-2.5 5a6 6 0 0 1-4.4 3.85L14 18h2v2H8v-2h2l-.6-4.15A6 6 0 0 1 5 10L2.5 5H6z"/></svg>,
   });

@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react';
 import type { Category } from '../lib/types';
 import type { ExerciseExtra as Exercise } from '../lib/queries';
+import { useLocale } from '../hooks/useLocale';
+import EmptyState from './EmptyState';
 
 interface Props {
   exercises: Exercise[];
@@ -10,6 +12,7 @@ interface Props {
 }
 
 export default function ExerciseList({ exercises, categories, initialCategory = null, initialQuery = '' }: Props) {
+  const { t } = useLocale();
   const [query, setQuery] = useState(initialQuery);
   const [catFilter, setCatFilter] = useState<number | null>(initialCategory);
 
@@ -47,7 +50,7 @@ export default function ExerciseList({ exercises, categories, initialCategory = 
           </svg>
           <input
             type="search"
-            placeholder="Buscar ejercicio…"
+            placeholder={t('exercises.searchPlaceholder')}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             className="w-full rounded-xl border border-border bg-elevated pl-9 pr-10 py-2.5 text-[15px] outline-none transition focus:border-accent/60"
@@ -57,7 +60,7 @@ export default function ExerciseList({ exercises, categories, initialCategory = 
               type="button"
               onClick={() => setQuery('')}
               className="absolute right-2 top-1/2 -translate-y-1/2 grid h-6 w-6 place-items-center rounded-md text-muted transition hover:bg-elevated hover:text-fg"
-              aria-label="Limpiar"
+              aria-label={t('action.clear')}
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
             </button>
@@ -97,13 +100,11 @@ export default function ExerciseList({ exercises, categories, initialCategory = 
       </div>
 
       <div className="mt-3 mb-3 flex items-center justify-between text-xs text-muted">
-        <span>{totalCount} ejercicio{totalCount === 1 ? '' : 's'}</span>
+        <span>{t('exercises.count', { n: totalCount })}</span>
       </div>
 
       {totalCount === 0 ? (
-        <div className="rounded-2xl border border-dashed border-border bg-card/50 p-10 text-center text-sm text-muted">
-          Sin resultados para tu búsqueda.
-        </div>
+        <EmptyState variant="search" />
       ) : (
         <div className="flex flex-col gap-5">
           {grouped.map(({ category, exercises: list }) => (
