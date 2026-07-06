@@ -2,12 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Category } from '../lib/types';
 import type { ExerciseExtra as Exercise, TrainingSetEx } from '../lib/queries';
 import {
-  copySetsFromDate as qCopySets,
   createExercise as qCreateExercise,
   createSet as qCreateSet,
   deleteSet as qDeleteSet,
   duplicateSet as qDuplicateSet,
-  getLastTrainingDateBefore as qLastTrainingDate,
   getSetsForDate as qGetSets,
   setWorkoutComment as qSetComment,
   updateSet as qUpdateSet,
@@ -41,7 +39,7 @@ interface DraftSet {
 }
 
 export default function WorkoutLogger({ date, exercises: initialExercises, categories, initialSets, initialComment, onSetsChange }: Props) {
-  const { t, fmt, fmtDate } = useLocale();
+  const { t } = useLocale();
   const [exercises, setExercises] = useState<Exercise[]>(initialExercises);
   const [sets, setSets] = useState<TrainingSet[]>(initialSets);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -55,17 +53,6 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
   // so the sets you've already logged stay easy to read — the form was
   // cluttering the view when it was always-on.
   const [openAdderId, setOpenAdderId] = useState<number | null>(null);
-  const [copying, setCopying] = useState(false);
-  // Rest timer: when the last set of THIS session was saved. Session-local on
-  // purpose — the FitNotes schema stores no time-of-day, only dates.
-  const [lastSetAt, setLastSetAt] = useState<number | null>(null);
-  const [, setTimerTick] = useState(0);
-
-  useEffect(() => {
-    if (!lastSetAt) return;
-    const id = setInterval(() => setTimerTick((x) => x + 1), 1000);
-    return () => clearInterval(id);
-  }, [lastSetAt]);
 
   // Sync incoming props when the parent finishes loading data from the
   // in-browser db. `useState(initialSets)` only reads props on first render,
@@ -120,7 +107,6 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
     const result = qCreateSet({ exercise_id: exerciseId, date, weight_kg: weight, reps });
     refreshSets();
     setPendingExerciseIds((prev) => prev.filter((id) => id !== exerciseId));
-    setLastSetAt(Date.now());
     // Light tap on save, stronger triple-buzz if we just set a PR.
     if (result?.pr_weight || result?.pr_reps) hapticPr();
     else hapticLight();
@@ -137,7 +123,6 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
     });
     refreshSets();
     setPendingExerciseIds((prev) => prev.filter((id) => id !== exerciseId));
-    setLastSetAt(Date.now());
     hapticLight();
   }
 
@@ -145,7 +130,6 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
     qDuplicateSet(setId);
     refreshSets();
     setEditingSetId(null);
-    setLastSetAt(Date.now());
     hapticMedium();
   }
 
@@ -213,28 +197,6 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
     return [...grouped, ...pending];
   }, [grouped, pendingExerciseIds]);
 
-  // "Repeat last workout" — only offered on a day with nothing logged yet.
-  const lastTrainingDate = useMemo(() => {
-    if (allCards.length > 0) return null;
-    try { return qLastTrainingDate(date); } catch { return null; }
-  }, [allCards.length, date]);
-
-  function copyLastWorkout() {
-    if (!lastTrainingDate || copying) return;
-    setCopying(true);
-    try {
-      qCopySets(lastTrainingDate, date);
-      refreshSets();
-      hapticLight();
-    } catch (e) {
-      console.error('[copyLastWorkout]', e);
-    } finally {
-      setCopying(false);
-    }
-  }
-
-  const restSecs = lastSetAt ? Math.floor((Date.now() - lastSetAt) / 1000) : 0;
-
   // PR summary for today
   const prTotals = useMemo(() => {
     let w = 0, r = 0;
@@ -269,45 +231,21 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
       <button
         type="button"
         onClick={() => setPickerOpen(true)}
-        className="flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-border bg-card/60 px-4 py-3.5 text-sm font-semibold text-fg transition hover:border-strong hover:bg-elevated"
+        className={`flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed px-4 text-sm font-semibold text-fg transition hover:border-strong hover:bg-elevated ${
+          allCards.length === 0
+            ? 'border-accent/40 bg-accent-soft/30 py-5'
+            : 'border-border bg-card/60 py-3.5'
+        }`}
       >
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M12 5v14" /><path d="M5 12h14" /></svg>
         {t('workout.addExercise')}
       </button>
 
-      {allCards.length === 0 ? (
-        <EmptyState
-          variant="workout"
-          action={lastTrainingDate ? (
-            <>
-              <button
-                type="button"
-                onClick={copyLastWorkout}
-                disabled={copying}
-                className="btn-accent mt-1 inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm disabled:opacity-50"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                </svg>
-                {copying ? t('workout.copying') : t('workout.copyYesterday')}
-              </button>
-              <div className="text-[11px] text-muted">
-                {t('workout.copyYesterdayHint', {
-                  date: fmtDate(lastTrainingDate, { weekday: 'short', day: 'numeric', month: 'short' }),
-                })}
-              </div>
-            </>
-          ) : undefined}
-        />
-      ) : (
+      {allCards.length > 0 && (
         <div className="flex flex-col gap-3">
           {allCards.map(({ exerciseId, sets: exSets }) => {
             const ex = exercises.find((e) => e.id === exerciseId);
             const cardio = isCardioExercise(exerciseId);
-            const totalVol = exSets.reduce((acc, s) => acc + s.weight_kg * s.reps, 0);
-            const totalDuration = exSets.reduce((acc, s) => acc + s.duration_seconds, 0);
-            const totalDistance = exSets.reduce((acc, s) => acc + s.distance_m, 0);
             const catColor = ex?.category_color ?? '#888';
             const lastExSets = exSets;
             return (
@@ -317,35 +255,20 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
                 className="card relative overflow-hidden"
                 style={{ boxShadow: `inset 3px 0 0 ${catColor}` }}
               >
-                <header
-                  className="flex items-center justify-between gap-2 px-4 py-3"
-                  style={{ background: `linear-gradient(90deg, color-mix(in srgb, ${catColor} 10%, transparent), transparent 60%)` }}
-                >
+                <header className="flex items-center justify-between gap-2 px-4 py-3">
                   <a href={`/exercise?id=${exerciseId}`} className="flex min-w-0 flex-1 items-center gap-2 font-semibold tracking-tight hover:underline">
-                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: catColor, boxShadow: `0 0 6px ${catColor}` }} />
+                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: catColor }} />
                     <span className="truncate">{ex?.name ?? `#${exerciseId}`}</span>
                   </a>
-                  <span className="hidden shrink-0 text-xs tabular-nums text-muted sm:inline">
-                    {exSets.length === 0
-                      ? t('workout.noSetsYet')
-                      : `${exSets.length} ${exSets.length === 1 ? t('workout.serie') : t('workout.series')}${cardio
-                          ? `${totalDuration ? ` · ${formatDuration(totalDuration)}` : ''}${totalDistance > 0 ? ` · ${formatDistance(totalDistance)}` : ''}`
-                          : ` · ${fmt(totalVol)} ${t('common.kg')}`}`}
-                  </span>
+                  {exSets.length > 0 && (
+                    <span className="shrink-0 text-xs tabular-nums text-muted">
+                      {exSets.length} {exSets.length === 1 ? t('workout.serie') : t('workout.series')}
+                    </span>
+                  )}
                 </header>
 
                 {exSets.length > 0 && (
-                  <>
-                    <div className="flex items-center justify-between border-t border-border/60 bg-elevated/30 px-4 py-1.5 text-[11px] tabular-nums text-muted sm:hidden">
-                      <span>{exSets.length} {exSets.length === 1 ? t('workout.serie') : t('workout.series')}</span>
-                      <span>
-                        {cardio
-                          ? `${formatDuration(totalDuration)}${totalDistance > 0 ? ` · ${formatDistance(totalDistance)}` : ''}`
-                          : `${fmt(totalVol)} ${t('common.kg')}`}
-                      </span>
-                    </div>
-
-                    <ol className="flex flex-col divide-y divide-border/60">
+                  <ol className="flex flex-col divide-y divide-border/60 border-t border-border/60">
                       {exSets.map((s, i) => (
                         <SetRow
                           key={s.id}
@@ -365,8 +288,7 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
                           onDuplicate={() => duplicateSet(s.id)}
                         />
                       ))}
-                    </ol>
-                  </>
+                  </ol>
                 )}
 
                 {openAdderId === exerciseId ? (
@@ -380,16 +302,6 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
                     >
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
                     </button>
-                    {lastSetAt && (
-                      <div className="mb-2 flex items-center gap-1.5 text-[11px] text-muted" title={t('workout.restTimer')}>
-                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <circle cx="12" cy="12" r="10" />
-                          <polyline points="12 6 12 12 16 14" />
-                        </svg>
-                        <span className="font-semibold tabular-nums text-fg">{formatDuration(restSecs)}</span>
-                        {t('workout.restTimer').toLowerCase()}
-                      </div>
-                    )}
                     {cardio ? (
                       <QuickAddCardio exerciseId={exerciseId} onAdd={addCardioSet} lastSets={lastExSets} />
                     ) : (
@@ -412,7 +324,8 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
         </div>
       )}
 
-      {/* Notes */}
+      {/* Notes — only when there is something logged */}
+      {allCards.length > 0 && (
       <section className="card p-4">
         <div className="section-title mb-2">{t('workout.notes')}</div>
         <textarea
@@ -426,6 +339,7 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
           className="w-full resize-none rounded-lg border border-border bg-elevated px-3 py-2 text-sm outline-none transition focus:border-accent/60"
         />
       </section>
+      )}
 
       {pickerOpen && (
         <ExercisePicker

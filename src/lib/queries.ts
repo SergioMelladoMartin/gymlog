@@ -458,40 +458,7 @@ export function getBodyWeight(): BodyWeight[] {
   );
 }
 
-// ─── Copy / duplicate helpers ─────────────────────────────────────────
-
-/** Most recent date (strictly before `beforeDate`) with at least one set. */
-export function getLastTrainingDateBefore(beforeDate: string): string | null {
-  const db = getDb();
-  const v = db.selectValue(
-    'SELECT MAX(date) FROM training_log WHERE date < ?',
-    [beforeDate],
-  );
-  return v ? String(v) : null;
-}
-
-/** Copy every set from `fromDate` into `toDate`. Returns the number of
- *  rows created. Used by the "Repetir último entreno" button — keeps the
- *  exercise, weight, reps, distance and duration so the user just has to
- *  tweak from there. `is_personal_record` is intentionally reset since the
- *  new rows haven't re-earned a PR. */
-export function copySetsFromDate(fromDate: string, toDate: string): number {
-  const db = getDb();
-  const src = rows<any>(
-    `SELECT exercise_id, metric_weight, reps, unit, distance, duration_seconds
-     FROM training_log WHERE date = ? ORDER BY _id ASC`,
-    [fromDate],
-  );
-  for (const r of src) {
-    db.exec({
-      sql: `INSERT INTO training_log (exercise_id, date, metric_weight, reps, unit, distance, duration_seconds)
-            VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      bind: [r.exercise_id, toDate, r.metric_weight, r.reps, r.unit ?? 0, r.distance ?? 0, r.duration_seconds ?? 0],
-    });
-  }
-  if (src.length) markDirty();
-  return src.length;
-}
+// ─── Duplicate helpers ─────────────────────────────────────────
 
 /** Duplicate a single set on the same date. Returns the new row id. */
 export function duplicateSet(setId: number): number {

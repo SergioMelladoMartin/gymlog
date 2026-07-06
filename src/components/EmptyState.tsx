@@ -1,6 +1,6 @@
 import { useT } from '../hooks/useT';
 
-export type EmptyVariant = 'workout' | 'diary' | 'stats' | 'exercises' | 'search';
+export type EmptyVariant = 'diary' | 'stats' | 'exercises' | 'search';
 
 interface Props {
   variant: EmptyVariant;
@@ -13,15 +13,6 @@ interface Props {
 function Illustration({ variant }: { variant: EmptyVariant }) {
   const common = 'stroke-current stroke-[1.5] fill-none';
   switch (variant) {
-    case 'workout':
-      return (
-        <svg width="80" height="80" viewBox="0 0 80 80" aria-hidden="true" className="text-accent/70">
-          <rect x="8" y="34" width="12" height="12" rx="3" className={common} fill="currentColor" fillOpacity="0.15" />
-          <rect x="60" y="34" width="12" height="12" rx="3" className={common} fill="currentColor" fillOpacity="0.15" />
-          <line x1="20" y1="40" x2="60" y2="40" className={common} strokeWidth="3" strokeLinecap="round" />
-          <circle cx="40" cy="40" r="28" className={common} strokeOpacity="0.35" strokeDasharray="4 6" />
-        </svg>
-      );
     case 'diary':
       return (
         <svg width="80" height="80" viewBox="0 0 80 80" aria-hidden="true" className="text-accent/70">

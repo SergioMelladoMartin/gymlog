@@ -132,7 +132,7 @@ function DayHeader({ date, setCount, exerciseCount, volume, hasPr }: {
           </div>
         </div>
       ) : (
-        <div className="border-t border-border px-4 py-3 text-center text-xs text-muted">
+        <div className="border-t border-border px-4 py-4 text-center text-sm text-muted">
           {isToday ? t('day.startToday') : t('day.noWorkout')}
         </div>
       )}
