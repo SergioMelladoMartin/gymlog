@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { isSignedIn, signIn } from '../lib/auth';
+import { hasAccount, signIn } from '../lib/auth';
 import { importBytes, loadDatabase } from '../lib/sqlite';
 import { useT } from '../hooks/useT';
 
@@ -9,7 +9,7 @@ export default function LoginView() {
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
-    if (isSignedIn()) window.location.replace('/');
+    if (hasAccount()) window.location.replace('/');
   }, []);
 
   async function handleGoogle() {
@@ -29,7 +29,7 @@ export default function LoginView() {
     setErr(null);
     setBusy(true);
     try {
-      if (!isSignedIn()) await signIn();
+      if (!hasAccount()) await signIn();
       const bytes = new Uint8Array(await file.arrayBuffer());
       await importBytes(bytes);
       window.location.replace('/');

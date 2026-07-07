@@ -14,10 +14,12 @@ import sqlite3InitModule, {
   type Sqlite3Static,
 } from '@sqlite.org/sqlite-wasm';
 import { deleteBlobFromDrive, pullBlobFromDrive, pushBlobToDrive, getRemoteMeta } from './drive';
-import { getAccessToken, isSignedIn } from './auth';
+import { ensureDriveAccess, getAccessToken, hasAccount, hasValidToken, renewAccess } from './auth';
+import { backupDelete, backupRead, backupWrite, hashBytes } from './localBackup';
 
 const OPFS_NAME = '/gymlog.fitnotes';
 const LS_REMOTE_META = 'gymlog-drive-meta';
+const LS_LOCAL_HASH = 'gymlog-local-hash';
 
 type RemoteMeta = { modifiedTime: string; size: number };
 
@@ -34,6 +36,19 @@ function writeStoredMeta(meta: RemoteMeta | null) {
   } catch {}
 }
 
+async function writeLocalHash(bytes: Uint8Array): Promise<void> {
+  try {
+    localStorage.setItem(LS_LOCAL_HASH, await hashBytes(bytes));
+  } catch {}
+}
+
+/** Persist bytes to OPFS + IndexedDB mirror + content hash. */
+async function persistLocalBytes(bytes: Uint8Array): Promise<void> {
+  await opfsWrite(bytes);
+  void backupWrite(bytes);
+  await writeLocalHash(bytes);
+}
+
 /** True when Drive's copy differs from what we last synced locally. */
 function isRemoteNewer(remote: RemoteMeta, stored: RemoteMeta | null): boolean {
   if (!stored) return true;
@@ -43,7 +58,7 @@ function isRemoteNewer(remote: RemoteMeta, stored: RemoteMeta | null): boolean {
 /** Persist a remote blob, update the sync watermark, and optionally hot-swap
  *  the in-memory DB (when the app is already running). */
 async function applyRemoteBytes(bytes: Uint8Array, meta: RemoteMeta, hotSwap: boolean): Promise<void> {
-  await opfsWrite(bytes);
+  await persistLocalBytes(bytes);
   writeStoredMeta(meta);
   setPending(false);
   dirty = false;
@@ -489,12 +504,21 @@ export async function loadDatabase(options: { seedUrl?: string } = {}): Promise<
     await initSqlite();
     void requestPersistentStorage();
 
-    // 1. Prefer a copy already in OPFS (fastest startup).
+    // 1. Prefer OPFS; fall back to IndexedDB mirror if OPFS is empty.
     let bytes = await opfsRead();
+    if (!bytes) {
+      const mirrored = await backupRead();
+      if (mirrored) {
+        bytes = mirrored;
+        await persistLocalBytes(bytes);
+        console.log('[load] restored OPFS from IndexedDB backup');
+      }
+    }
 
-    // 2. If signed in, reconcile with Drive. Remote-first: a stuck `pending`
-    //    flag on stale local data must NOT block pulling newer phone edits,
-    //    and must NOT push old OPFS bytes over a fresher Drive copy.
+    // 2. If the user has a Google account, reconcile with Drive.
+    //    Remote-first: a stuck `pending` flag on stale local data must NOT
+    //    block pulling newer phone edits, and must NOT push old OPFS bytes
+    //    over a fresher Drive copy.
     //
     //    We track whether the Drive read actually SUCCEEDED (vs. threw on a
     //    flaky network / expired token). This matters for the no-local-copy
@@ -503,7 +527,8 @@ export async function loadDatabase(options: { seedUrl?: string } = {}): Promise<
     //    must NOT be mistaken for "Drive is empty".
     let remoteReadFailed = false;
     let remoteFileExists = false;
-    if (isSignedIn()) {
+    if (hasAccount()) {
+      await ensureDriveAccess(false).catch(() => {});
       let meta: Awaited<ReturnType<typeof getRemoteMeta>> | null = null;
       try {
         meta = await getRemoteMeta();
@@ -565,9 +590,11 @@ export async function loadDatabase(options: { seedUrl?: string } = {}): Promise<
       const res = await fetch(options.seedUrl).catch(() => null);
       if (res?.ok) {
         bytes = new Uint8Array(await res.arrayBuffer());
-        await opfsWrite(bytes);
+        await persistLocalBytes(bytes);
       }
     }
+
+    if (bytes) void writeLocalHash(bytes);
 
     if (!bytes) {
       // We have no local copy. Creating a fresh empty DB and pushing it is
@@ -577,7 +604,7 @@ export async function loadDatabase(options: { seedUrl?: string } = {}): Promise<
       // clobber the real backup (this is exactly the "opened on the laptop,
       // network hiccuped, lost everything" trap). Bail to a recoverable error
       // and let the retry below pull once Drive is reachable again.
-      if (isSignedIn() && (remoteReadFailed || remoteFileExists)) {
+      if (hasAccount() && (remoteReadFailed || remoteFileExists)) {
         console.warn('[load] no local copy and Drive unreadable — refusing to seed/clobber, will retry');
         setStatus('error', new Error('No se pudo cargar tu copia de Google Drive. Reintentando…'));
         scheduleLoadRetry(options);
@@ -588,7 +615,7 @@ export async function loadDatabase(options: { seedUrl?: string } = {}): Promise<
       // local-only DB they could scribble into (it would never sync). Mark
       // 'empty' so useDatabase() bounces them to /login. Returning users keep
       // working because their OPFS copy is found above before we get here.
-      if (!isSignedIn()) {
+      if (!hasAccount()) {
         setStatus('empty');
         return;
       }
@@ -611,8 +638,8 @@ export async function loadDatabase(options: { seedUrl?: string } = {}): Promise<
     // migrated bytes once — otherwise we'd re-run the migration on every load
     // and Drive/other devices would never get the newer shape.
     if (migrated) {
-      try { await opfsWrite(serialize(db)); } catch (e) { console.error('[load] persist migrated bytes', e); }
-      if (isSignedIn()) scheduleSync(true).catch(() => {});
+      try { await persistLocalBytes(serialize(db)); } catch (e) { console.error('[load] persist migrated bytes', e); }
+      if (hasAccount()) scheduleSync(true).catch(() => {});
     }
   } catch (e) {
     console.error('loadDatabase', e);
@@ -686,7 +713,7 @@ export async function importBytes(bytes: Uint8Array): Promise<void> {
   // have to re-migrate.
   try {
     const migratedBytes = serialize(db);
-    await opfsWrite(migratedBytes);
+    await persistLocalBytes(migratedBytes);
   } catch (e: any) {
     console.error('[import] persist failed', e);
     // Don't bail — the in-memory DB is already usable.
@@ -796,33 +823,33 @@ async function flushToDrive(): Promise<void> {
 
   // Another device may have pushed while we were offline. Pull first so we
   // never overwrite a fresher Drive copy with stale local bytes.
-  if (isSignedIn()) {
-    const meta = await getRemoteMeta().catch(() => null);
-    if (meta && isRemoteNewer(meta, readStoredMeta())) {
-      const pulled = await pullRemoteIfNewer();
-      if (pulled) return;
-      setSyncState('error');
-      return;
+  if (hasAccount()) {
+    const accessible = await ensureDriveAccess(false);
+    if (accessible) {
+      const meta = await getRemoteMeta().catch(() => null);
+      if (meta && isRemoteNewer(meta, readStoredMeta())) {
+        const pulled = await pullRemoteIfNewer();
+        if (pulled) return;
+        setSyncState('error');
+        return;
+      }
     }
   }
 
-  // NOTE: deliberately *not* bailing on `!isSignedIn()`. The Google access
-  // token expires every hour; once it's gone, isSignedIn() returns false
-  // and the flush would silently drop the upload, leaving the user stuck
-  // on a yellow "cambios sin subir" pill forever. Letting the push run
-  // means authHeaders → getAccessToken triggers a silent refresh; if that
-  // fails (e.g. third-party cookies blocked on iOS) the error surfaces
+  // NOTE: deliberately *not* bailing on missing token. ensureDriveAccess /
+  // getAccessToken trigger a silent refresh; if that fails the error surfaces
   // as the red pill and the user can tap it to re-auth interactively.
   dirty = false;
   setSyncState('syncing');
   inFlight = (async () => {
     try {
       const bytes = serialize(db!);
-      await opfsWrite(bytes);
-      // pushBlobToDrive returns the new modifiedTime/size so we don't
-      // need a separate getRemoteMeta() round-trip — that extra call is
-      // what was making the "syncing" pill linger on slow connections.
+      await persistLocalBytes(bytes);
       const meta = await pushBlobToDrive(bytes);
+      const verified = await getRemoteMeta().catch(() => null);
+      if (!verified || verified.size !== bytes.byteLength) {
+        throw new Error('La subida a Drive no se verificó correctamente');
+      }
       writeStoredMeta({ modifiedTime: meta.modifiedTime, size: meta.size });
       setLastSyncAt(Date.now());
       // Only clear the pending bit if no new mutation came in mid-flight.
@@ -855,8 +882,10 @@ async function flushToDrive(): Promise<void> {
  * unpushed local edits — those get flushed first by the caller.
  */
 async function pullRemoteIfNewer(): Promise<boolean> {
-  if (!db || !isSignedIn()) return false;
+  if (!db || !hasAccount()) return false;
   if (inFlight) return false;
+  const accessible = await ensureDriveAccess(false);
+  if (!accessible) return false;
   const meta = await getRemoteMeta().catch(() => null);
   if (!meta) return false;
   if (!isRemoteNewer(meta, readStoredMeta())) return false;
@@ -907,6 +936,13 @@ export async function flushNow(): Promise<void> {
  *  third-party cookies), this is also our chance to prompt the user
  *  interactively from inside their gesture. */
 export async function forceSync(): Promise<void> {
+  if (!hasAccount()) return;
+
+  if (!hasValidToken()) {
+    const renewed = await renewAccess(true);
+    if (!renewed) return;
+  }
+
   // Remote-first: if another device pushed since our last sync, pull it and
   // skip pushing — otherwise we'd clobber their edits with stale local data.
   try {
@@ -988,7 +1024,9 @@ export async function wipeAll(): Promise<void> {
   try { await deleteBlobFromDrive(); } catch (e) { console.error('[wipe] drive', e); throw e; }
   if (db) { db.close(); db = null; }
   await opfsDelete();
+  await backupDelete();
   writeStoredMeta(null);
+  try { localStorage.removeItem(LS_LOCAL_HASH); } catch {}
   setLastSyncAt(null);
   setPending(false);
   dirty = false;
@@ -1000,7 +1038,9 @@ export async function wipeAll(): Promise<void> {
 export async function resetLocal(): Promise<void> {
   if (db) { db.close(); db = null; }
   await opfsDelete();
+  await backupDelete();
   writeStoredMeta(null);
+  try { localStorage.removeItem(LS_LOCAL_HASH); } catch {}
   setLastSyncAt(null);
   setPending(false);
   dirty = false;

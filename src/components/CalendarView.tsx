@@ -7,7 +7,7 @@ import { CalendarSkeleton } from './Skeleton';
 type View = 'month' | 'year';
 
 export default function CalendarView() {
-  const ready = useDatabase();
+  const { ready, revision } = useDatabase();
   const { t, fmt, fmtDate, weekdaysShort } = useLocale();
   const now = new Date();
   const url = typeof window !== 'undefined' ? new URL(window.location.href) : null;
@@ -29,7 +29,7 @@ export default function CalendarView() {
     const d = getTrainingDaysInRange(rangeFrom, rangeTo);
     setDays(d);
     setPrs(getDayPrCounts(d.map((x) => x.date)));
-  }, [ready, rangeFrom, rangeTo]);
+  }, [ready, revision, rangeFrom, rangeTo]);
 
   const byDate = useMemo(() => new Map(days.map((d) => [d.date, d])), [days]);
   const totalDays = days.length;

@@ -15,7 +15,7 @@ import { useLocale } from '../hooks/useLocale';
 import { DaySkeleton } from './Skeleton';
 
 export default function DayView() {
-  const ready = useDatabase();
+  const { ready, revision } = useDatabase();
   const urlDate = typeof window !== 'undefined'
     ? new URL(window.location.href).searchParams.get('d')
     : null;
@@ -31,7 +31,7 @@ export default function DayView() {
     setExercises(getExercises());
     setSets(getSetsForDate(nowDate));
     setComment(getWorkoutComment(nowDate));
-  }, [ready, nowDate]);
+  }, [ready, revision, nowDate]);
 
   const { totalVol, uniqueEx, hasPr } = useMemo(() => {
     const vol = sets.reduce((acc, s: any) => acc + s.weight_kg * s.reps, 0);

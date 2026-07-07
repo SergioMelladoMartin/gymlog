@@ -8,7 +8,7 @@ import ExerciseList from './ExerciseList';
 import { ExercisesSkeleton } from './Skeleton';
 
 export default function ExercisesView() {
-  const ready = useDatabase();
+  const { ready, revision } = useDatabase();
   const { t } = useLocale();
   const [exercises, setExercises] = useState<ExerciseExtra[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -18,7 +18,7 @@ export default function ExercisesView() {
     if (!ready) return;
     setCategories(getCategories());
     setExercises(getExercises());
-  }, [ready]);
+  }, [ready, revision]);
 
   function refreshExercises() {
     setExercises(getExercises());

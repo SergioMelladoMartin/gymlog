@@ -25,7 +25,7 @@ function formatDate(iso: string, fmtDate: (iso: string, o: Intl.DateTimeFormatOp
 }
 
 export default function ExerciseDetailView() {
-  const ready = useDatabase();
+  const { ready, revision } = useDatabase();
   const { t, fmtDate } = useLocale();
   const id = typeof window !== 'undefined'
     ? Number(new URL(window.location.href).searchParams.get('id') ?? 0)
@@ -44,7 +44,7 @@ export default function ExerciseDetailView() {
     setSessions(getExerciseSessionStats(id));
     setHistory(getExerciseSetsHistory(id, 200));
     setCategories(getCategories());
-  }, [ready, id]);
+  }, [ready, revision, id]);
 
   if (!ready) return <GenericSkeleton />;
   if (notFound) { if (typeof window !== 'undefined') window.location.replace('/exercises'); return null; }

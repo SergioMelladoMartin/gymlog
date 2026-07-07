@@ -34,7 +34,7 @@ function rangeLabel(range: Range, year: number, t: (k: string, v?: Record<string
 }
 
 export default function StatsView() {
-  const ready = useDatabase();
+  const { ready, revision } = useDatabase();
   const { t, fmt, fmtDate, weekdaysLong, weekdaysNarrow } = useLocale();
   const url = typeof window !== 'undefined' ? new URL(window.location.href) : null;
   const range = (url?.searchParams.get('range') ?? 'all') as Range;
@@ -124,7 +124,7 @@ export default function StatsView() {
     const wm = new Map<number, number>();
     for (const r of wk as any[]) wm.set(Number(r.dow), Number(r.c));
     setWeekday([1, 2, 3, 4, 5, 6, 0].map((d) => wm.get(d) ?? 0));
-  }, [ready, range, year]);
+  }, [ready, revision, range, year]);
 
   useEffect(() => {
     if (!ready) return;
@@ -155,7 +155,7 @@ export default function StatsView() {
         volume: Number(r.volume ?? 0),
       })),
     );
-  }, [ready, groupBy, trendLimit]);
+  }, [ready, revision, groupBy, trendLimit]);
 
   if (!ready) return <StatsSkeleton />;
 

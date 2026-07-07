@@ -1,24 +1,28 @@
 import { useEffect, useRef, useState } from 'react';
 import { forceSync, getSyncInfo, onSyncChange, type SyncState } from '../lib/sqlite';
+import { getAuthStatus, onAuthChange, renewAccess, type AuthStatus } from '../lib/auth';
 import { hapticSuccess } from '../lib/haptics';
 import { useT } from '../hooks/useT';
 
 /**
- * Compact sync pill in the header. Shows four states:
- *   • idle   → ✓ hace 3 min   (muted)
- *   • dirty  → ⏺ cambios      (amber)
- *   • syncing→ spinner subiendo (amber)
- *   • error  → ⚠ reintentar   (danger, clickable)
- * When offline the browser reports it and we show the offline label.
+ * Compact sync pill in the header. States:
+ *   • idle            → ✓ hace 3 min
+ *   • dirty           → cambios sin subir
+ *   • syncing         → subiendo
+ *   • error           → error al sincronizar
+ *   • token_expired   → renovar acceso a Drive
+ *   • offline         → sin conexión
  */
 export default function SyncStatus() {
   const { t } = useT();
   const [info, setInfo] = useState(() => getSyncInfo());
+  const [authStatus, setAuthStatus] = useState<AuthStatus>(() => getAuthStatus());
   const [online, setOnline] = useState(() => typeof navigator === 'undefined' ? true : navigator.onLine);
   const [, setTick] = useState(0);
   const prevState = useRef<SyncState>(info.state);
 
   useEffect(() => onSyncChange(setInfo), []);
+  useEffect(() => onAuthChange(setAuthStatus), []);
 
   useEffect(() => {
     const onOn = () => setOnline(true);
@@ -31,7 +35,6 @@ export default function SyncStatus() {
     };
   }, []);
 
-  // Re-render every 30s so "hace 2 min" ticks forward on its own.
   useEffect(() => {
     const id = setInterval(() => setTick((x) => x + 1), 30_000);
     return () => clearInterval(id);
@@ -45,7 +48,12 @@ export default function SyncStatus() {
     prevState.current = state;
   }, [state, online]);
 
-  const effState: SyncState = !online && state !== 'syncing' ? 'error' : state;
+  const tokenExpired = authStatus === 'token_expired';
+  const effState: SyncState = !online && state !== 'syncing'
+    ? 'error'
+    : tokenExpired && state === 'idle'
+      ? 'error'
+      : state;
 
   let tone = 'text-muted';
   let icon: React.ReactNode = null;
@@ -57,6 +65,11 @@ export default function SyncStatus() {
     label = t('sync.offline');
     icon = <DotIcon />;
     aria = t('sync.offline');
+  } else if (tokenExpired && state !== 'syncing' && state !== 'dirty') {
+    tone = 'text-amber-400';
+    label = t('sync.tokenExpired');
+    icon = <KeyIcon />;
+    aria = `${t('sync.tokenExpired')} — ${t('sync.tapToRenew')}`;
   } else if (effState === 'syncing') {
     tone = 'text-amber-400';
     label = t('sync.syncing');
@@ -79,13 +92,19 @@ export default function SyncStatus() {
     aria = `${t('sync.synced')} ${label} — ${t('action.retry')}`;
   }
 
-  // The pill is always clickable: tap it and we flush whatever's pending
-  // and pull anything new from Drive. Useful when the user wants to
-  // force a sync because something looks stale.
+  async function handleClick() {
+    if (tokenExpired) {
+      const ok = await renewAccess(true);
+      if (ok) await forceSync().catch(() => {});
+      return;
+    }
+    await forceSync().catch(() => {});
+  }
+
   return (
     <button
       type="button"
-      onClick={() => forceSync().catch(() => {})}
+      onClick={() => { void handleClick(); }}
       disabled={effState === 'syncing'}
       title={aria}
       aria-label={aria}
@@ -134,6 +153,14 @@ function WarnIcon() {
       <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
       <line x1="12" y1="9" x2="12" y2="13" />
       <line x1="12" y1="17" x2="12.01" y2="17" />
+    </svg>
+  );
+}
+function KeyIcon() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="m15.5 7.5 2.893 2.893a1 1 0 0 0 1.414 0l2.379-2.379a1 1 0 0 0 0-1.414L19 4.5" />
+      <path d="M7 11a4 4 0 1 0 0 8h1" />
     </svg>
   );
 }

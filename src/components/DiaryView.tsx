@@ -29,7 +29,7 @@ function argbToHex(n: number | null): string | null {
 }
 
 export default function DiaryView() {
-  const ready = useDatabase();
+  const { ready, revision } = useDatabase();
   const { t, fmt, fmtDate } = useLocale();
   const [days, setDays] = useState<DayRow[]>([]);
   const [breakdown, setBreakdown] = useState<Map<string, BreakdownRow[]>>(new Map());
@@ -123,7 +123,7 @@ export default function DiaryView() {
       setHasOlder(!!oldest && !!db.selectValue('SELECT EXISTS(SELECT 1 FROM training_log WHERE date < ?) AS has', [oldest]));
       setHasNewer(!!newest && paged && !!db.selectValue('SELECT EXISTS(SELECT 1 FROM training_log WHERE date > ?) AS has', [newest]));
     }
-  }, [ready, before, after, paged]);
+  }, [ready, revision, before, after, paged]);
 
   if (!ready) return <DiarySkeleton />;
 

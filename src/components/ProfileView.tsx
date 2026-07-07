@@ -17,7 +17,7 @@ interface Stats {
 
 export default function ProfileView() {
   const { t, fmt, fmtDate } = useLocale();
-  const ready = useDatabase();
+  const { ready, revision } = useDatabase();
   const [user, setUser] = useState<UserProfile | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
   const [streak, setStreak] = useState<number>(0);
@@ -46,7 +46,7 @@ export default function ProfileView() {
       lastDay: row?.last_day ?? null,
     });
     setStreak(getWeeklyStreak());
-  }, [ready]);
+  }, [ready, revision]);
 
   if (!ready) return <ProfileSkeleton />;
 
