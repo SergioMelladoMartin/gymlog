@@ -11,6 +11,7 @@ import {
   updateSet as qUpdateSet,
 } from '../lib/queries';
 import { useLocale } from '../hooks/useLocale';
+import { useT } from '../hooks/useT';
 import { hapticLight, hapticDelete, hapticPr, hapticMedium } from '../lib/haptics';
 import EmptyState from './EmptyState';
 
@@ -536,6 +537,7 @@ function ExercisePicker({
   onClose: () => void;
   onCreate: (name: string, categoryId: number) => Promise<Exercise | null>;
 }) {
+  const { t } = useT();
   const [query, setQuery] = useState('');
   const [stepCategory, setStepCategory] = useState<number | null>(null); // null = group index
   const [creatorOpen, setCreatorOpen] = useState(false);
@@ -761,6 +763,8 @@ function SetRow({
   onDelete: () => void;
   onDuplicate: () => void;
 }) {
+  const { t } = useT();
+
   if (editing) {
     return (
       <li className="bg-elevated/40 px-4 py-2.5">
