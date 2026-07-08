@@ -20,6 +20,13 @@ import { ChartSkeleton, GenericSkeleton } from './Skeleton';
 // its place instead of blocking the whole page mount.
 const ExerciseChart = lazy(() => import('./ExerciseChart'));
 
+function readExerciseId(): number {
+  if (typeof window === 'undefined') return 0;
+  const raw = new URL(window.location.href).searchParams.get('id');
+  const n = Number(raw ?? 0);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
 function formatDate(iso: string, fmtDate: (iso: string, o: Intl.DateTimeFormatOptions) => string) {
   return fmtDate(iso, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
 }
@@ -27,28 +34,59 @@ function formatDate(iso: string, fmtDate: (iso: string, o: Intl.DateTimeFormatOp
 export default function ExerciseDetailView() {
   const { ready, revision } = useDatabase();
   const { t, fmtDate } = useLocale();
-  const id = typeof window !== 'undefined'
-    ? Number(new URL(window.location.href).searchParams.get('id') ?? 0)
-    : 0;
+  const [exerciseId, setExerciseId] = useState(0);
+  const [idSynced, setIdSynced] = useState(false);
   const [exercise, setExercise] = useState<ExerciseExtra | null>(null);
   const [sessions, setSessions] = useState<ExerciseSessionStat[]>([]);
   const [history, setHistory] = useState<TrainingSetEx[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [notFound, setNotFound] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+
+  // ClientRouter navigations update the URL without a full reload — read the
+  // id after mount and on every in-app page swap so Hoy → ejercicio works.
+  useEffect(() => {
+    const syncId = () => {
+      setExerciseId(readExerciseId());
+      setIdSynced(true);
+    };
+    syncId();
+    document.addEventListener('astro:page-load', syncId);
+    return () => document.removeEventListener('astro:page-load', syncId);
+  }, []);
 
   useEffect(() => {
-    if (!ready) return;
-    const ex = getExerciseById(id);
-    if (!ex) { setNotFound(true); return; }
-    setExercise(ex);
-    setSessions(getExerciseSessionStats(id));
-    setHistory(getExerciseSetsHistory(id, 200));
-    setCategories(getCategories());
-  }, [ready, revision, id]);
+    if (!ready || !idSynced) return;
+    if (!exerciseId) {
+      setNotFound(true);
+      setLoaded(true);
+      return;
+    }
+    setLoaded(false);
+    setNotFound(false);
+    try {
+      const ex = getExerciseById(exerciseId);
+      if (!ex) {
+        setNotFound(true);
+        setLoaded(true);
+        return;
+      }
+      setExercise(ex);
+      setSessions(getExerciseSessionStats(exerciseId));
+      setHistory(getExerciseSetsHistory(exerciseId, 200));
+      setCategories(getCategories());
+      setLoaded(true);
+    } catch (e) {
+      console.error(e);
+      setLoaded(true);
+    }
+  }, [ready, revision, exerciseId, idSynced]);
 
-  if (!ready) return <GenericSkeleton />;
-  if (notFound) { if (typeof window !== 'undefined') window.location.replace('/exercises'); return null; }
-  if (!exercise) return null;
+  if (!ready || !idSynced || !loaded) return <GenericSkeleton />;
+  if (notFound || !exercise) {
+    if (typeof window !== 'undefined') window.location.replace('/exercises');
+    return <GenericSkeleton />;
+  }
 
   const totalSets = history.length;
   const totalSessions = sessions.length;
@@ -112,7 +150,7 @@ export default function ExerciseDetailView() {
             }
             return (
               <a key={date} href={`/day?d=${date}`} className="-mx-2 flex items-baseline justify-between gap-3 rounded-md px-2 py-2.5 text-sm transition hover:bg-elevated">
-                <span className="shrink-0 capitalize text-muted">{formatDate(date)}</span>
+                <span className="shrink-0 capitalize text-muted">{formatDate(date, fmtDate)}</span>
                 <span className="text-right tabular-nums">
                   {sets.map((s, i) => (
                     <span key={s.id}>

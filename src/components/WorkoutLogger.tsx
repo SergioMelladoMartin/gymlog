@@ -5,6 +5,7 @@ import type { ExerciseExtra as Exercise, TrainingSetEx } from '../lib/queries';
 import {
   createExercise as qCreateExercise,
   createSet as qCreateSet,
+  deleteExerciseFromDay as qDeleteExerciseFromDay,
   deleteSet as qDeleteSet,
   duplicateSet as qDuplicateSet,
   getSetsForDate as qGetSets,
@@ -141,6 +142,20 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
     hapticDelete();
   }
 
+  function removeExerciseFromDay(exerciseId: number, hasSets: boolean) {
+    if (hasSets) {
+      const ex = exercises.find((e) => e.id === exerciseId);
+      const name = ex?.name ?? `#${exerciseId}`;
+      if (!window.confirm(t('workout.confirmRemoveExercise', { name }))) return;
+      qDeleteExerciseFromDay(exerciseId, date);
+      refreshSets();
+    } else {
+      setPendingExerciseIds((prev) => prev.filter((id) => id !== exerciseId));
+    }
+    if (openAdderId === exerciseId) setOpenAdderId(null);
+    hapticDelete();
+  }
+
   function updateSet(
     id: number,
     patch: Partial<Pick<TrainingSet, 'weight_kg' | 'reps' | 'duration_seconds' | 'distance_m'>>,
@@ -274,11 +289,22 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
                       {ex?.name ?? `#${exerciseId}`}
                     </a>
                   </div>
-                  {exSets.length > 0 && (
-                    <span className="shrink-0 rounded-md bg-elevated px-2 py-0.5 text-[11px] font-medium tabular-nums text-muted">
-                      {exSets.length} {exSets.length === 1 ? t('workout.serie') : t('workout.series')}
-                    </span>
-                  )}
+                  <div className="flex shrink-0 items-center gap-1">
+                    {exSets.length > 0 && (
+                      <span className="rounded-md bg-elevated px-2 py-0.5 text-[11px] font-medium tabular-nums text-muted">
+                        {exSets.length} {exSets.length === 1 ? t('workout.serie') : t('workout.series')}
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => removeExerciseFromDay(exerciseId, exSets.length > 0)}
+                      className="grid h-8 w-8 place-items-center rounded-md text-muted transition hover:bg-danger/10 hover:text-danger"
+                      aria-label={t('workout.removeFromDay')}
+                      title={t('workout.removeFromDay')}
+                    >
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M3 6h18" /><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6" /><path d="M14 11v6" /></svg>
+                    </button>
+                  </div>
                 </header>
 
                 {exSets.length > 0 && (

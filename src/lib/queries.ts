@@ -270,6 +270,12 @@ export function deleteSet(id: number): void {
   markDirty();
 }
 
+/** Remove every set logged for this exercise on a given day (keeps the exercise in the catalog). */
+export function deleteExerciseFromDay(exerciseId: number, date: string): void {
+  exec('DELETE FROM training_log WHERE exercise_id = ? AND date = ?', [exerciseId, date]);
+  markDirty();
+}
+
 // ─── Training days (calendar / diary) ─────────────────────────────────
 
 export interface TrainingDay {
