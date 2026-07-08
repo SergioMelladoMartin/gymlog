@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { Category } from '../lib/types';
 import type { ExerciseExtra as Exercise, TrainingSetEx } from '../lib/queries';
 import {
@@ -248,21 +249,33 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
             const ex = exercises.find((e) => e.id === exerciseId);
             const cardio = isCardioExercise(exerciseId);
             const catColor = ex?.category_color ?? '#888';
+            const catName = ex?.category_name ?? categoryById.get(exerciseId)?.name ?? '';
             const lastExSets = exSets;
             return (
               <article
                 key={exerciseId}
                 id={`ex-${exerciseId}`}
-                className="card relative overflow-hidden"
-                style={{ boxShadow: `inset 3px 0 0 ${catColor}` }}
+                className="card overflow-hidden"
               >
-                <header className="flex items-center justify-between gap-2 px-4 py-3">
-                  <a href={`/exercise?id=${exerciseId}`} className="flex min-w-0 flex-1 items-center gap-2 font-semibold tracking-tight hover:underline">
-                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: catColor }} />
-                    <span className="truncate">{ex?.name ?? `#${exerciseId}`}</span>
-                  </a>
+                <header className="flex items-start justify-between gap-3 border-b border-border/50 px-4 py-3">
+                  <div className="min-w-0 flex-1">
+                    {catName ? (
+                      <div
+                        className="mb-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted"
+                        style={{ color: `color-mix(in srgb, ${catColor} 70%, var(--color-muted))` }}
+                      >
+                        {catName}
+                      </div>
+                    ) : null}
+                    <a
+                      href={`/exercise?id=${exerciseId}`}
+                      className="block truncate text-[15px] font-semibold leading-snug tracking-tight hover:underline"
+                    >
+                      {ex?.name ?? `#${exerciseId}`}
+                    </a>
+                  </div>
                   {exSets.length > 0 && (
-                    <span className="shrink-0 text-xs tabular-nums text-muted">
+                    <span className="shrink-0 rounded-md bg-elevated px-2 py-0.5 text-[11px] font-medium tabular-nums text-muted">
                       {exSets.length} {exSets.length === 1 ? t('workout.serie') : t('workout.series')}
                     </span>
                   )}
@@ -541,8 +554,10 @@ function ExercisePicker({
   const [query, setQuery] = useState('');
   const [stepCategory, setStepCategory] = useState<number | null>(null); // null = group index
   const [creatorOpen, setCreatorOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    setMounted(true);
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       if (creatorOpen) { setCreatorOpen(false); return; }
@@ -597,11 +612,16 @@ function ExercisePicker({
   const activeCategory = stepCategory != null ? categories.find((c) => c.id === stepCategory) ?? null : null;
   const showGroupsIndex = !isSearching && stepCategory === null;
 
-  return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-bg/75 backdrop-blur-2xl backdrop-saturate-150">
-      <div className="mx-auto flex h-full w-full max-w-3xl flex-col px-4 pt-4 pb-2">
-        {/* Top bar: back button (if inside group or searching) + search input + close */}
-        <div className="flex items-center gap-2">
+  if (!mounted) return null;
+
+  const overlay = (
+    <div className="fixed inset-0 z-[80] flex flex-col bg-bg">
+      {/* Own top bar — portaled to body so it never sits under the app header. */}
+      <div
+        className="glass-bar shrink-0 border-b border-border/60"
+        style={{ paddingTop: 'max(0.75rem, env(safe-area-inset-top))' }}
+      >
+        <div className="mx-auto flex w-full max-w-3xl items-center gap-2 px-4 pb-3 pt-1">
           {stepCategory !== null && (
             <button
               type="button"
@@ -612,8 +632,8 @@ function ExercisePicker({
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
             </button>
           )}
-          <div className="relative flex-1">
-            <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>
+          <div className="relative min-w-0 flex-1">
+            <svg className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>
             <input
               autoFocus
               placeholder={activeCategory ? t('exercises.searchInGroup', { name: activeCategory.name }) : t('exercises.searchPlaceholder')}
@@ -625,18 +645,21 @@ function ExercisePicker({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg px-3 py-2 text-sm text-muted transition hover:bg-card hover:text-fg"
+            className="shrink-0 rounded-lg px-3 py-2 text-sm font-medium text-muted transition hover:bg-elevated hover:text-fg"
           >
-            Cerrar
+            {t('action.close')}
           </button>
         </div>
+      </div>
 
-        {/* Step header when inside a group */}
+      <div
+        className="mx-auto flex w-full max-w-3xl min-h-0 flex-1 flex-col px-4 pt-3"
+        style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
+      >
         {activeCategory && !isSearching && (
-          <div className="mt-3 flex items-center gap-2">
-            <span className="h-2.5 w-2.5 rounded-full" style={{ background: activeCategory.color ?? '#888' }} />
+          <div className="mb-1 flex items-baseline gap-2">
             <h2 className="text-lg font-semibold tracking-tight">{activeCategory.name}</h2>
-            <span className="text-xs text-muted">· {t('exercises.count', { n: countByCat.get(activeCategory.id) ?? 0 })}</span>
+            <span className="text-xs text-muted">{t('exercises.count', { n: countByCat.get(activeCategory.id) ?? 0 })}</span>
           </div>
         )}
 
@@ -670,12 +693,10 @@ function ExercisePicker({
                     type="button"
                     onClick={() => setStepCategory(c.id)}
                     className="group flex items-center justify-between gap-2 rounded-xl border border-border bg-card p-3 text-left transition hover:border-strong hover:bg-elevated"
+                    style={{ background: `color-mix(in srgb, ${c.color ?? '#888'} 8%, var(--color-card))` }}
                   >
                     <div className="flex min-w-0 flex-col">
-                      <span className="flex items-center gap-2">
-                        <span className="h-2 w-2 rounded-full" style={{ background: c.color ?? '#888', boxShadow: `0 0 8px ${c.color}55` }} />
-                        <span className="truncate font-semibold">{c.name}</span>
-                      </span>
+                      <span className="truncate font-semibold">{c.name}</span>
                       <span className="mt-0.5 text-[11px] text-muted">
                         {n} ejerc{last ? ` · ${relativeDate(last)}` : ''}
                       </span>
@@ -695,9 +716,11 @@ function ExercisePicker({
                   onClick={() => onSelect(e.id)}
                   className="flex w-full items-center justify-between px-4 py-3 text-left transition hover:bg-elevated"
                 >
-                  <span className="flex min-w-0 items-center gap-2.5">
-                    <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: e.category_color ?? '#888' }} />
-                    <span className="truncate">{e.name}</span>
+                  <span className="flex min-w-0 flex-col truncate">
+                    <span className="truncate font-medium">{e.name}</span>
+                    {e.category_name ? (
+                      <span className="truncate text-[10px] uppercase tracking-wider text-muted">{e.category_name}</span>
+                    ) : null}
                   </span>
                   {e.last_used && <span className="shrink-0 text-xs text-muted">{relativeDate(e.last_used)}</span>}
                 </button>
@@ -740,6 +763,8 @@ function ExercisePicker({
       </div>
     </div>
   );
+
+  return createPortal(overlay, document.body);
 }
 
 function SetRow({
