@@ -414,18 +414,14 @@
 }
 
 /* Content-area loading spinner during ClientRouter navigation.
-   The page's view is a `client:only` island, so between the DOM swap and
-   React mounting there's a blank gap with no feedback. While that island is
-   still empty we render a centred spinner via ::after. Scoped to <main> so
-   the persistent sidebar / sync-status islands never trigger it. The 150ms
-   delayed fade-in means instant mounts don't flash a spinner. Once React
-   fills the island it is no longer :empty, so these rules stop applying. */
-main astro-island:empty {
-  display: block;
+   Do NOT use `astro-island:empty` — Astro sets display:contents on islands,
+   so :empty never clears even after React mounts (infinite spinner bug).
+   Layout.astro toggles data-nav-loading on <main> instead. */
+main[data-nav-loading] {
   position: relative;
   min-height: 60vh;
 }
-main astro-island:empty::after {
+main[data-nav-loading]::after {
   content: '';
   position: absolute;
   left: 50%;
@@ -474,7 +470,7 @@ main astro-island:empty::after {
   .pr-shine::after { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
-  main astro-island:empty::after { animation: nav-spinner-in 0.2s ease 0.15s forwards; }
+  main[data-nav-loading]::after { animation: nav-spinner-in 0.2s ease 0.15s forwards; }
 }
 
 /* ── Skeleton loaders ─────────────────────────────────────────────────── */

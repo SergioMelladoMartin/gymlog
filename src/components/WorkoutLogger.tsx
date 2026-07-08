@@ -284,6 +284,10 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
                     ) : null}
                     <a
                       href={`/exercise?id=${exerciseId}`}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        window.location.assign(`/exercise?id=${exerciseId}`);
+                      }}
                       className="block truncate text-[15px] font-semibold leading-snug tracking-tight hover:underline"
                     >
                       {ex?.name ?? `#${exerciseId}`}
@@ -346,6 +350,16 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
                       <QuickAddCardio exerciseId={exerciseId} onAdd={addCardioSet} lastSets={lastExSets} />
                     ) : (
                       <QuickAdd exerciseId={exerciseId} onAdd={addSet} lastSets={lastExSets} />
+                    )}
+                    {exSets.length === 0 && (
+                      <button
+                        type="button"
+                        onClick={() => removeExerciseFromDay(exerciseId, false)}
+                        className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-danger/40 bg-danger/10 py-2.5 text-sm font-medium text-danger transition hover:bg-danger/20"
+                      >
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M3 6h18" /><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6" /><path d="M14 11v6" /></svg>
+                        {t('workout.removeFromDay')}
+                      </button>
                     )}
                   </div>
                 ) : (

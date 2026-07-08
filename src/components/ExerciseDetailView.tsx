@@ -34,6 +34,7 @@ function formatDate(iso: string, fmtDate: (iso: string, o: Intl.DateTimeFormatOp
 export default function ExerciseDetailView() {
   const { ready, revision } = useDatabase();
   const { t, fmtDate } = useLocale();
+  // SSR + first client paint: window hooks run only in effects below.
   const [exerciseId, setExerciseId] = useState(0);
   const [idSynced, setIdSynced] = useState(false);
   const [exercise, setExercise] = useState<ExerciseExtra | null>(null);

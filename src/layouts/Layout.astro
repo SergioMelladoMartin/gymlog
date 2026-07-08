@@ -81,6 +81,14 @@ const { title = 'gymlog', activeNav = 'today' } = Astro.props;
         }
         document.addEventListener('astro:before-preparation', start);
         document.addEventListener('astro:page-load', done);
+        // Main content spinner — see global.css (avoid astro-island:empty).
+        var main = document.querySelector('main');
+        document.addEventListener('astro:before-preparation', function () {
+          main && main.setAttribute('data-nav-loading', '');
+        });
+        document.addEventListener('astro:page-load', function () {
+          main && main.removeAttribute('data-nav-loading');
+        });
       })();
     </script>
     <script is:inline>

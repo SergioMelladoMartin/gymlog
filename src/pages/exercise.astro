@@ -3,5 +3,8 @@ import Layout from '../layouts/Layout.astro';
 import ExerciseDetailView from '../components/ExerciseDetailView';
 ---
 <Layout title="Ejercicio · gymlog" activeNav="exercises">
-  <ExerciseDetailView client:only="react" />
+  <!-- client:load (not client:only) so the island ships an SSR skeleton.
+       With client:only, ClientRouter navigations leave an empty island and
+       the CSS loading spinner never clears. -->
+  <ExerciseDetailView client:load />
 </Layout>
