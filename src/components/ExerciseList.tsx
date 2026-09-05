@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import type { Category } from '../lib/types';
 import type { ExerciseExtra as Exercise } from '../lib/queries';
 import { useT } from '../hooks/useT';
+import EmptyState from './EmptyState';
 
 interface Props {
   exercises: Exercise[];
@@ -103,9 +104,7 @@ export default function ExerciseList({ exercises, categories, initialCategory = 
       </div>
 
       {totalCount === 0 ? (
-        <div className="rounded-2xl border border-dashed border-border bg-card/50 p-10 text-center text-sm text-muted">
-          {t('exercises.noResults')}
-        </div>
+        <EmptyState variant="search" title={t('exercises.noResults')} />
       ) : (
         <div className="flex flex-col gap-5">
           {grouped.map(({ category, exercises: list }) => (

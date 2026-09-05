@@ -17,6 +17,7 @@ import { deleteBlobFromDrive, pullBlobFromDrive, pushBlobToDrive, getRemoteMeta 
 import { hasSession, getStoragePrefix, AuthExpiredError } from './auth';
 import { clearJournal, hasJournalOverflowed, readJournal, replayJournal } from './journal';
 import { createDebouncedRunner } from './debounce';
+import { backupBytes, restoreBytes } from './localBackup';
 
 const LEGACY_OPFS_NAME = '/gymlog.fitnotes';
 function opfsName(): string {
@@ -459,8 +460,19 @@ async function opfsRead(): Promise<Uint8Array | null> {
     const root = await navigator.storage.getDirectory();
     const handle = await root.getFileHandle(opfsName().replace(/^\//, ''), { create: false });
     const file = await handle.getFile();
-    return new Uint8Array(await file.arrayBuffer());
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    if (bytes.length === 0) throw new Error('empty opfs file');
+    return bytes;
   } catch {
+    // OPFS empty or unreadable — fall back to the IndexedDB mirror, if any.
+    // This does NOT touch Drive/journal reconciliation: loadDatabase()'s
+    // own remote-vs-local comparison still runs exactly as before on
+    // whatever bytes come back here.
+    const restored = await restoreBytes();
+    if (restored && restored.length > 0) {
+      try { await opfsWrite(restored); } catch (e) { console.error('[localBackup] re-seed opfs failed', e); }
+      return restored;
+    }
     return null;
   }
 }
@@ -472,6 +484,7 @@ async function opfsWrite(bytes: Uint8Array): Promise<void> {
   const w = await (handle as any).createWritable();
   await w.write(bytes);
   await w.close();
+  void backupBytes(bytes);
 }
 
 async function opfsDelete(): Promise<void> {

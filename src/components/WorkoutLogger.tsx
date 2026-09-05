@@ -5,6 +5,7 @@ import {
   copySetsFromDate as qCopySets,
   createExercise as qCreateExercise,
   createSet as qCreateSet,
+  deleteExerciseFromDay as qDeleteExerciseFromDay,
   deleteSet as qDeleteSet,
   duplicateSet as qDuplicateSet,
   getLastTrainingDateBefore as qLastTrainingDate,
@@ -18,10 +19,7 @@ import { useConfirm } from './ui/ConfirmDialog';
 import { toast } from './ui/Toast';
 import RestTimer from './RestTimer';
 import BottomSheet from './ui/BottomSheet';
-
-function vibrate(pattern: number | number[]) {
-  try { if ('vibrate' in navigator) navigator.vibrate(pattern); } catch {}
-}
+import { hapticLight, hapticDelete, hapticPr } from '../lib/haptics';
 
 // Runtime set shape used by the logger — extended query type with PR flags
 // and the legacy `is_personal_record` for backwards compat with the UI.
@@ -121,11 +119,11 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
     setSetTick((x) => x + 1);
     // Light tap on save, stronger triple-buzz if we just set a PR.
     if (result?.pr_weight || result?.pr_reps) {
-      vibrate([20, 40, 20, 40, 40]);
+      hapticPr();
       const exName = exercises.find((e) => e.id === exerciseId)?.name ?? '';
       announcePr(exName, weight, reps, t);
     } else {
-      vibrate(10);
+      hapticLight();
     }
   }
 
@@ -141,7 +139,7 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
     refreshSets();
     setPendingExerciseIds((prev) => prev.filter((id) => id !== exerciseId));
     setSetTick((x) => x + 1);
-    vibrate(10);
+    hapticLight();
   }
 
   function duplicateSet(setId: number) {
@@ -149,12 +147,31 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
     refreshSets();
     setEditingSetId(null);
     setSetTick((x) => x + 1);
-    vibrate(10);
+    hapticLight();
   }
 
   function deleteSet(id: number) {
     qDeleteSet(id);
     refreshSets();
+  }
+
+  async function removeExerciseFromDay(exerciseId: number, exSets: TrainingSet[]) {
+    if (exSets.length > 0) {
+      const name = exercises.find((e) => e.id === exerciseId)?.name ?? `#${exerciseId}`;
+      const ok = await confirm({
+        body: t('workout.confirmRemoveExercise', { name }),
+        confirmLabel: t('action.delete'),
+        destructive: true,
+      });
+      if (!ok) return;
+      qDeleteExerciseFromDay(exerciseId, date);
+      refreshSets();
+    } else {
+      setPendingExerciseIds((prev) => prev.filter((id) => id !== exerciseId));
+    }
+    if (openAdderId === exerciseId) setOpenAdderId(null);
+    if (editingSetId != null && exSets.some((s) => s.id === editingSetId)) setEditingSetId(null);
+    hapticDelete();
   }
 
   function updateSet(
@@ -227,7 +244,7 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
     try {
       qCopySets(lastTrainingDate, date);
       refreshSets();
-      vibrate(10);
+      hapticLight();
     } catch (e) {
       console.error('[copyLastWorkout]', e);
     } finally {
@@ -346,6 +363,17 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
                           ? `${totalDuration ? ` · ${formatDuration(totalDuration)}` : ''}${totalDistance > 0 ? ` · ${formatDistance(totalDistance)}` : ''}`
                           : ` · ${Math.round(totalVol).toLocaleString(locale)} kg`}`}
                   </span>
+                  <button
+                    type="button"
+                    onClick={() => removeExerciseFromDay(exerciseId, exSets)}
+                    aria-label={t('workout.removeExercise')}
+                    title={t('workout.removeExercise')}
+                    className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-muted transition hover:bg-elevated hover:text-red-400"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M3 6h18" /><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                    </svg>
+                  </button>
                 </header>
 
                 {exSets.length > 0 && (

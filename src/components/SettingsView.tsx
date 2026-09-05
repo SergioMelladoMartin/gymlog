@@ -23,7 +23,7 @@ interface BeforeInstallPromptEvent extends Event {
 export default function SettingsView() {
   const { t, lang } = useT();
   const confirm = useConfirm();
-  const [theme, setTheme] = useState<'light' | 'dark'>('dark');
+  const [theme, setTheme] = useState<'light' | 'dark' | 'amoled'>('dark');
   const [accent, setAccent] = useState<string>('lime');
   const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null);
   const [isInstalled, setIsInstalled] = useState(false);
@@ -33,7 +33,7 @@ export default function SettingsView() {
   const [wiping, setWiping] = useState(false);
 
   useEffect(() => {
-    setTheme((document.documentElement.getAttribute('data-theme') as 'light' | 'dark') || 'dark');
+    setTheme((document.documentElement.getAttribute('data-theme') as 'light' | 'dark' | 'amoled') || 'dark');
     setAccent(document.documentElement.getAttribute('data-accent') || 'lime');
 
     const standalone =
@@ -53,7 +53,8 @@ export default function SettingsView() {
   }, []);
 
   function toggleTheme() {
-    const next = theme === 'dark' ? 'light' : 'dark';
+    // Cycle: dark → light → amoled → dark…
+    const next = theme === 'dark' ? 'light' : theme === 'light' ? 'amoled' : 'dark';
     document.documentElement.setAttribute('data-theme', next);
     try { localStorage.setItem('theme', next); } catch {}
     setTheme(next);
@@ -163,14 +164,18 @@ export default function SettingsView() {
           className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-sm transition hover:bg-elevated"
         >
           <span className="flex items-center gap-2.5">
-            {theme === 'dark' ? (
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" /></svg>
-            ) : (
+            {theme === 'light' ? (
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="4" /><path d="M12 2v2" /><path d="M12 20v2" /><path d="m4.93 4.93 1.41 1.41" /><path d="m17.66 17.66 1.41 1.41" /><path d="M2 12h2" /><path d="M20 12h2" /><path d="m6.34 17.66-1.41 1.41" /><path d="m19.07 4.93-1.41 1.41" /></svg>
+            ) : theme === 'amoled' ? (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="12" cy="12" r="9" /></svg>
+            ) : (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" /></svg>
             )}
             {t('settings.theme')}
           </span>
-          <span className="text-muted">{theme === 'dark' ? t('settings.themeDark') : t('settings.themeLight')}</span>
+          <span className="text-muted">
+            {theme === 'dark' ? t('settings.themeDark') : theme === 'light' ? t('settings.themeLight') : t('settings.themeAmoled')}
+          </span>
         </button>
 
         <div className="mt-3 border-t border-border pt-3">

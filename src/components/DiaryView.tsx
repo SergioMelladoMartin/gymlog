@@ -5,6 +5,7 @@ import { getDb } from '../lib/sqlite';
 import { useT } from '../hooks/useT';
 import { getLocale } from '../lib/i18n';
 import { DiarySkeleton } from './ui/Skeleton';
+import EmptyState from './EmptyState';
 
 interface DayRow {
   date: string;
@@ -157,7 +158,7 @@ export default function DiaryView() {
       </div>
 
       {days.length === 0 ? (
-        <p className="text-muted">{t('diary.noWorkouts')}</p>
+        <EmptyState variant="diary" body={t('diary.noWorkouts')} />
       ) : (
         <div className="flex flex-col gap-3">
           {days.map((d) => {

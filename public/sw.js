@@ -12,7 +12,7 @@
 // this SW has cached the shell, the whole thing works offline except the
 // Drive sync which is gated on network anyway.
 
-const CACHE_VERSION = 'gymlog-v5';
+const CACHE_VERSION = 'gymlog-v12';
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const ASSET_CACHE = `${CACHE_VERSION}-assets`;
 

@@ -277,6 +277,15 @@ export function deleteSet(id: number): void {
   markDirty();
 }
 
+/** "Quitar del día" — drops every logged set for one exercise on one date.
+ *  Pure data delete, no schema changes: same table, same journal shape as
+ *  the other mutations here so sync/replay keeps working unmodified. */
+export function deleteExerciseFromDay(exerciseId: number, date: string): void {
+  exec('DELETE FROM training_log WHERE exercise_id = ? AND date = ?', [exerciseId, date]);
+  appendOp('deleteExerciseFromDay', 'training_log', { exerciseId, date });
+  markDirty();
+}
+
 // ─── Training days (calendar / diary) ─────────────────────────────────
 
 export interface TrainingDay {
