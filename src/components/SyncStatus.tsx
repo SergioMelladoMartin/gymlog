@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { forceSync, getSyncInfo, onSyncChange, type SyncState } from '../lib/sqlite';
+import { signIn } from '../lib/auth';
 import { useT } from '../hooks/useT';
 
 /**
@@ -63,6 +64,11 @@ export default function SyncStatus() {
     label = t('sync.error');
     icon = <WarnIcon />;
     aria = `${t('sync.error')} — ${t('action.retry')}`;
+  } else if (effState === 'reauth') {
+    tone = 'text-amber-400';
+    label = t('sync.reauth');
+    icon = <WarnIcon />;
+    aria = t('sync.reauth');
   } else {
     tone = 'text-muted';
     label = relativeSync(lastSyncAt, t);
@@ -76,7 +82,13 @@ export default function SyncStatus() {
   return (
     <button
       type="button"
-      onClick={() => forceSync().catch(() => {})}
+      onClick={() => {
+        if (effState === 'reauth') {
+          signIn(location.pathname + location.search);
+          return;
+        }
+        forceSync().catch(() => {});
+      }}
       disabled={effState === 'syncing'}
       title={aria}
       aria-label={aria}

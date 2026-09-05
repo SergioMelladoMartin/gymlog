@@ -1,35 +1,95 @@
 import { useEffect, useState } from 'react';
-import { isSignedIn, signIn } from '../lib/auth';
-import { importBytes, loadDatabase } from '../lib/sqlite';
+import { hasSession, signIn } from '../lib/auth';
+import { importBytes } from '../lib/sqlite';
+import { t } from '../lib/i18n';
+
+const PENDING_IMPORT_NAME = 'pending-import.fitnotes';
+
+async function opfsWritePending(bytes: Uint8Array): Promise<void> {
+  if (!('storage' in navigator) || !navigator.storage.getDirectory) return;
+  const root = await navigator.storage.getDirectory();
+  const handle = await root.getFileHandle(PENDING_IMPORT_NAME, { create: true });
+  const w = await (handle as any).createWritable();
+  await w.write(bytes);
+  await w.close();
+}
+
+async function opfsReadAndClearPending(): Promise<Uint8Array | null> {
+  if (!('storage' in navigator) || !navigator.storage.getDirectory) return null;
+  try {
+    const root = await navigator.storage.getDirectory();
+    const handle = await root.getFileHandle(PENDING_IMPORT_NAME, { create: false });
+    const file = await handle.getFile();
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    await root.removeEntry(PENDING_IMPORT_NAME).catch(() => {});
+    return bytes;
+  } catch {
+    return null;
+  }
+}
+
+const ERROR_MESSAGES: Record<string, string> = {
+  server_not_configured: 'auth.serverNotConfigured',
+  state_mismatch: 'auth.error.state_mismatch',
+  token_exchange_failed: 'auth.error.token_exchange_failed',
+  missing_scope: 'auth.error.missing_scope',
+};
 
 export default function LoginView() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
-    if (isSignedIn()) window.location.replace('/');
+    if (hasSession()) {
+      window.location.replace('/');
+      return;
+    }
+    // Coming back from signIn('/login?import=1') with a pending backup
+    // stashed in OPFS (see handleUpload below).
+    const params = new URLSearchParams(location.search);
+    const errorParam = params.get('error');
+    if (errorParam) {
+      setErr(t(ERROR_MESSAGES[errorParam] ?? 'auth.error.generic'));
+    }
   }, []);
 
-  async function handleGoogle() {
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get('import') === '1' && hasSession()) {
+      void (async () => {
+        const bytes = await opfsReadAndClearPending();
+        if (!bytes) return;
+        setBusy(true);
+        try {
+          await importBytes(bytes);
+          window.location.replace('/');
+        } catch (e: any) {
+          setErr(e?.message ?? String(e));
+          setBusy(false);
+        }
+      })();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function handleGoogle() {
     setErr(null);
     setBusy(true);
-    try {
-      await signIn();
-      await loadDatabase({ seedUrl: import.meta.env.DEV ? '/seed.fitnotes' : undefined });
-      window.location.replace('/');
-    } catch (e: any) {
-      setErr(e?.message ?? String(e));
-      setBusy(false);
-    }
+    signIn('/');
   }
 
   async function handleUpload(file: File) {
     setErr(null);
     setBusy(true);
     try {
-      // Sign in first so the import immediately pushes the backup to Drive.
-      if (!isSignedIn()) await signIn();
       const bytes = new Uint8Array(await file.arrayBuffer());
+      if (!hasSession()) {
+        // Stash the backup and come back through the OAuth flow before
+        // importing — importBytes() needs a session to push to Drive.
+        await opfsWritePending(bytes);
+        signIn('/login?import=1');
+        return;
+      }
       await importBytes(bytes);
       window.location.replace('/');
     } catch (e: any) {
@@ -69,7 +129,7 @@ export default function LoginView() {
           <path fill="#FBBC05" d="M5.83 14.09A6.62 6.62 0 0 1 5.47 12c0-.73.13-1.44.36-2.09V7.07H2.18a11 11 0 0 0 0 9.86l3.65-2.84z"/>
           <path fill="#EA4335" d="M12 5.38c1.62 0 3.07.56 4.22 1.64l3.15-3.15A11 11 0 0 0 12 1a11 11 0 0 0-9.82 6.07l3.65 2.84C6.7 7.32 9.13 5.38 12 5.38z"/>
         </svg>
-        {busy ? 'Conectando…' : 'Continuar con Google'}
+        {busy ? t('login.connecting') : 'Continuar con Google'}
       </button>
 
       <div className="my-2 flex items-center gap-3 text-xs uppercase tracking-wider text-muted">

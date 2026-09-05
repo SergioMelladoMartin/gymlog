@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { getStatus, loadDatabase, onStatusChange } from '../lib/sqlite';
-import { isSignedIn } from '../lib/auth';
+import { hasSession } from '../lib/auth';
 
 /**
  * Boots the SQLite database on first use (OPFS → Drive → seed fallback)
@@ -24,7 +24,7 @@ export function useDatabase(): boolean {
   }, []);
 
   useEffect(() => {
-    if (status === 'empty' && !isSignedIn() && typeof window !== 'undefined') {
+    if (status === 'empty' && !hasSession() && typeof window !== 'undefined') {
       window.location.replace('/login');
     }
   }, [status]);

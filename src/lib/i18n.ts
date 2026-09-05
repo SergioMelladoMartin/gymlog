@@ -112,6 +112,17 @@ const ES: Dict = {
   'sync.justNow': 'ahora',
   'sync.minAgo': 'hace {n} min',
   'sync.hourAgo': 'hace {n} h',
+  'sync.reauth': 'Sesión caducada · toca para entrar',
+
+  // Auth / login errors
+  'auth.serverNotConfigured':
+    'El servidor no está configurado todavía (faltan variables de entorno). Avisa al administrador.',
+  'auth.error.state_mismatch': 'No se pudo verificar el inicio de sesión. Inténtalo de nuevo.',
+  'auth.error.token_exchange_failed': 'Google rechazó el intercambio de credenciales. Inténtalo de nuevo.',
+  'auth.error.missing_scope':
+    'Faltan permisos de Drive. Marca la casilla de acceso a "appdata" al iniciar sesión con Google.',
+  'auth.error.generic': 'No se pudo iniciar sesión. Inténtalo de nuevo.',
+  'login.connecting': 'Conectando…',
 
   // Onboarding
   'onb.step1Title': 'Bienvenido a gymlog',
@@ -224,6 +235,16 @@ const EN: Dict = {
   'sync.justNow': 'just now',
   'sync.minAgo': '{n} min ago',
   'sync.hourAgo': '{n} h ago',
+  'sync.reauth': 'Session expired · tap to sign in',
+
+  'auth.serverNotConfigured':
+    'The server isn\'t configured yet (missing environment variables). Contact the administrator.',
+  'auth.error.state_mismatch': 'Could not verify the sign-in attempt. Please try again.',
+  'auth.error.token_exchange_failed': 'Google rejected the credential exchange. Please try again.',
+  'auth.error.missing_scope':
+    'Missing Drive permissions. Tick the "appdata" access checkbox when signing in with Google.',
+  'auth.error.generic': 'Could not sign in. Please try again.',
+  'login.connecting': 'Connecting…',
 
   'onb.step1Title': 'Welcome to gymlog',
   'onb.step1Body':

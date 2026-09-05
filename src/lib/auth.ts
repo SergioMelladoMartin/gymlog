@@ -1,46 +1,16 @@
-// Google Identity Services (GIS) browser-only OAuth + Drive API helpers.
-// No backend, no cookies, no refresh tokens stored. GIS hands us a short-
-// lived access token (~1h) that we cache in memory and re-acquire silently
-// when the user returns.
+// Browser-side auth client for the Vercel OAuth backend (src/pages/api/auth/*).
+//
+// No more Google Identity Services, no more 1h-token-with-no-refresh. The
+// server holds an encrypted refresh token in an HttpOnly cookie and hands
+// out short-lived access tokens on demand via POST /api/auth/token.
 
-const CLIENT_ID = import.meta.env.PUBLIC_GOOGLE_CLIENT_ID as string | undefined;
-const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.appdata';
-const PROFILE_SCOPES = 'openid email profile';
-const GIS_SRC = 'https://accounts.google.com/gsi/client';
-
-interface TokenResponse {
-  access_token: string;
-  expires_in: number;
-  scope: string;
-}
-
-declare global {
-  interface Window {
-    google?: {
-      accounts: {
-        oauth2: {
-          initTokenClient(config: {
-            client_id: string;
-            scope: string;
-            callback: (r: TokenResponse & { error?: string }) => void;
-            error_callback?: (e: { type: string; message?: string }) => void;
-          }): { requestAccessToken: (opts?: { prompt?: string }) => void };
-          revoke(token: string, done?: () => void): void;
-        };
-      };
-    };
-  }
-}
+const STORAGE_KEY = 'gymlog:auth';
+const PROFILE_COOKIE = 'gymlog_profile';
 
 interface CachedToken {
   token: string;
   expiresAt: number;
 }
-
-const STORAGE_KEY = 'gymlog:auth';
-let memoryToken: CachedToken | null = null;
-let userProfile: UserProfile | null = null;
-let gisLoaded: Promise<void> | null = null;
 
 export interface UserProfile {
   email: string;
@@ -48,35 +18,58 @@ export interface UserProfile {
   picture?: string;
 }
 
-// ── GIS script loader ────────────────────────────────────────────────────
-function loadGis(): Promise<void> {
-  if (gisLoaded) return gisLoaded;
-  gisLoaded = new Promise((resolve, reject) => {
-    if (typeof window === 'undefined') return reject(new Error('no window'));
-    if (window.google?.accounts?.oauth2) return resolve();
-    const s = document.createElement('script');
-    s.src = GIS_SRC;
-    s.async = true;
-    s.defer = true;
-    s.onload = () => resolve();
-    s.onerror = () => reject(new Error('Failed to load Google Identity Services'));
-    document.head.appendChild(s);
-  });
-  return gisLoaded;
+/** Thrown by getAccessToken() when the server says the session can't be
+ *  refreshed any more (refresh token revoked/expired/missing). Callers
+ *  should send the user through signIn() again. */
+export class AuthExpiredError extends Error {
+  constructor() {
+    super('reauth');
+    this.name = 'AuthExpiredError';
+  }
+}
+
+let memoryToken: CachedToken | null = null;
+let userProfile: UserProfile | null = null;
+let inFlightTokenRequest: Promise<string> | null = null;
+
+// ── cookie / localStorage readers ───────────────────────────────────────
+
+function readCookie(name: string): string | null {
+  if (typeof document === 'undefined') return null;
+  const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
+  return match ? match[1] : null;
+}
+
+function readProfileFromCookie(): UserProfile | null {
+  const raw = readCookie(PROFILE_COOKIE);
+  if (!raw) return null;
+  try {
+    return JSON.parse(decodeURIComponent(raw));
+  } catch {
+    return null;
+  }
+}
+
+function readProfileFromStorage(): UserProfile | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed.profile ?? null;
+  } catch {
+    return null;
+  }
 }
 
 function readCachedToken(): CachedToken | null {
-  if (memoryToken && memoryToken.expiresAt > Date.now() + 30_000) return memoryToken;
+  if (memoryToken && memoryToken.expiresAt > Date.now() + 60_000) return memoryToken;
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as CachedToken & { profile?: UserProfile };
-    if (parsed.expiresAt > Date.now() + 30_000) {
+    if (parsed.expiresAt > Date.now() + 60_000) {
       memoryToken = { token: parsed.token, expiresAt: parsed.expiresAt };
       if (parsed.profile) userProfile = parsed.profile;
-      // Re-arm the proactive refresh timer for tokens loaded from a
-      // previous session — otherwise we'd only schedule it the very
-      // first time storeToken runs in this page lifetime.
       scheduleProactiveRefresh(parsed.expiresAt);
       return memoryToken;
     }
@@ -84,198 +77,144 @@ function readCachedToken(): CachedToken | null {
   return null;
 }
 
-function storeToken(token: string, expiresIn: number, profile?: UserProfile) {
+function storeToken(token: string, expiresIn: number) {
   const expiresAt = Date.now() + expiresIn * 1000;
   memoryToken = { token, expiresAt };
   try {
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({ token, expiresAt, profile: profile ?? userProfile }),
-    );
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ token, expiresAt, profile: userProfile }));
   } catch {}
-  if (profile) userProfile = profile;
   scheduleProactiveRefresh(expiresAt);
 }
 
-// ── proactive silent refresh ─────────────────────────────────────────────
-//
-// Google's browser-only OAuth flow only ever issues 1 h access tokens.
-// Without a refresh token (which would require a backend secret), the
-// only way to keep the session alive is to silently re-request a token
-// while we still have a valid Google session cookie — `prompt: ''`.
-//
-// Doing it lazily (only when the token actually runs out) means a stale
-// or paused tab can lose the chance, and the user is forced to re-auth.
-// Refreshing ~2 min before expiry while the tab is foregrounded turns
-// this into a no-op for Chrome / Firefox / Edge (silent refresh works,
-// user sees nothing). On iOS Safari with third-party cookies blocked
-// the silent attempt may still fail, but at most once an hour — and a
-// single tap on the sync pill recovers.
+function clearLocalAuth() {
+  memoryToken = null;
+  userProfile = null;
+  if (refreshTimer) { clearTimeout(refreshTimer); refreshTimer = null; }
+  try { localStorage.removeItem(STORAGE_KEY); } catch {}
+}
+
+// ── proactive refresh ────────────────────────────────────────────────────
 let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 function scheduleProactiveRefresh(expiresAt: number) {
   if (refreshTimer) clearTimeout(refreshTimer);
-  // Fire 2 minutes before expiry, with a sane minimum of 30 s.
+  // Fire 2 minutes before expiry, minimum 30s.
   const delay = Math.max(30_000, expiresAt - Date.now() - 120_000);
   refreshTimer = setTimeout(() => {
-    void silentRefresh();
+    void getAccessToken().catch((e) => {
+      console.warn('[auth] proactive refresh failed; will retry on next user action', e);
+    });
   }, delay);
 }
 
-async function silentRefresh(): Promise<void> {
-  // Skip if the user is offline or the tab is hidden — we'll try again
-  // when they come back.
-  if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
-  if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
-    // try again when foregrounded
-    return;
-  }
-  // Force a refresh even if the cached token still has time left, by
-  // wiping the in-memory copy first. localStorage stays as a fallback.
-  memoryToken = null;
-  try {
-    await getAccessToken(false); // silent, will reschedule on success
-  } catch (e) {
-    console.warn('[auth] proactive refresh failed; will retry on next user action', e);
-    // On failure don't keep retrying in a loop — wait for user activity.
-  }
-}
-
 if (typeof window !== 'undefined') {
-  // When the tab comes back into focus, top up the token if we missed a
-  // scheduled refresh while hidden / suspended (mobile lifecycle).
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return;
     const cached = memoryToken;
     if (!cached) return;
     const remaining = cached.expiresAt - Date.now();
-    if (remaining < 5 * 60_000) void silentRefresh();
-  });
-  window.addEventListener('online', () => {
-    const cached = memoryToken;
-    if (!cached) return;
-    const remaining = cached.expiresAt - Date.now();
-    if (remaining < 5 * 60_000) void silentRefresh();
+    if (remaining < 5 * 60_000) {
+      void getAccessToken().catch(() => {});
+    }
   });
 }
 
-// ── public API ───────────────────────────────────────────────────────────
+// ── public API ────────────────────────────────────────────────────────
 
-export function getClientId(): string {
-  if (!CLIENT_ID) {
-    throw new Error(
-      'Missing PUBLIC_GOOGLE_CLIENT_ID env var — set it in .env and restart the dev server.',
-    );
-  }
-  return CLIENT_ID;
+/** True if this browser has ever completed sign-in — a cookie profile or a
+ *  cached profile in localStorage. Doesn't guarantee the refresh token is
+ *  still valid server-side; that's only known once getAccessToken() is
+ *  actually called. Use this everywhere the real question is "has this
+ *  person signed in before", not "do we have a live token right now". */
+export function hasSession(): boolean {
+  return !!readProfileFromCookie() || !!readProfileFromStorage();
 }
+
+/** @deprecated kept as an alias so existing imports keep working. */
+export const isSignedIn = hasSession;
 
 export function getCurrentUser(): UserProfile | null {
   if (userProfile) return userProfile;
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (parsed.profile) userProfile = parsed.profile;
-    }
-  } catch {}
+  const fromCookie = readProfileFromCookie();
+  if (fromCookie) { userProfile = fromCookie; return fromCookie; }
+  const fromStorage = readProfileFromStorage();
+  if (fromStorage) userProfile = fromStorage;
   return userProfile;
 }
 
-export function isSignedIn(): boolean {
-  return !!readCachedToken();
+/** Redirects the browser to the server-side OAuth start endpoint. `next`
+ *  is where Google sends the user back to after consenting (defaults to
+ *  the current path so a re-auth from mid-app returns them there). */
+export function signIn(next?: string): void {
+  const target = next ?? (typeof location !== 'undefined' ? location.pathname + location.search : '/');
+  const params = new URLSearchParams({ next: target });
+  window.location.assign(`/api/auth/start?${params}`);
 }
 
-/**
- * Returns a valid access token, re-prompting the user silently if the
- * cached one is expired. Throws if no token can be obtained.
- *
- * Wrapped in a 12 s timeout: silent refresh on iOS / strict-cookie
- * browsers occasionally never resolves (no callback, no error). Without
- * the timeout the whole sync pipeline would hang on its caller.
- */
-const TOKEN_TIMEOUT_MS = 12_000;
+const TOKEN_TIMEOUT_MS = 8_000;
 
-export async function getAccessToken(interactive = false): Promise<string> {
+/**
+ * Returns a valid access token, refreshing it via the server if the cached
+ * one has less than 60s left. Concurrent calls share a single in-flight
+ * request. Throws AuthExpiredError if the server says the refresh token is
+ * no longer valid (caller should redirect to signIn()).
+ */
+export async function getAccessToken(): Promise<string> {
   const cached = readCachedToken();
   if (cached) return cached.token;
 
-  await loadGis();
+  if (inFlightTokenRequest) return inFlightTokenRequest;
 
-  const tokenPromise = new Promise<string>((resolve, reject) => {
-    const client = window.google!.accounts.oauth2.initTokenClient({
-      client_id: getClientId(),
-      scope: `${DRIVE_SCOPE} ${PROFILE_SCOPES}`,
-      callback: async (resp) => {
-        if (resp.error || !resp.access_token) {
-          reject(new Error(resp.error ?? 'No access token'));
-          return;
-        }
-        // Validate that the user actually granted the Drive scope — Google
-        // will happily issue a token for a subset of requested scopes if the
-        // user unticks a checkbox on the consent screen.
-        if (!resp.scope?.includes(DRIVE_SCOPE)) {
-          reject(
-            new Error(
-              'Faltan permisos de Drive. En la pantalla de Google, marca la casilla "Ver, crear y eliminar datos de esta aplicación en tu Google Drive". Si no aparece, añade el scope drive.appdata en tu OAuth consent screen.',
-            ),
-          );
-          return;
-        }
-        const profileRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-          headers: { Authorization: `Bearer ${resp.access_token}` },
-        });
-        const profile: UserProfile = profileRes.ok
-          ? await profileRes.json().then((p) => ({
-              email: p.email,
-              name: p.name ?? p.email,
-              picture: p.picture,
-            }))
-          : { email: 'unknown', name: 'Usuario' };
-        storeToken(resp.access_token, resp.expires_in, profile);
-        resolve(resp.access_token);
-      },
-      error_callback: (e) => reject(new Error(e.message ?? e.type)),
-    });
-    // prompt:'consent' re-asks for permissions (useful after a 403 to let
-    // the user re-tick the Drive checkbox). Empty = silent re-auth.
-    client.requestAccessToken({ prompt: interactive ? 'consent' : '' });
-  });
+  inFlightTokenRequest = (async () => {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), TOKEN_TIMEOUT_MS);
+    try {
+      const res = await fetch('/api/auth/token', {
+        method: 'POST',
+        credentials: 'same-origin',
+        signal: ac.signal,
+      });
+      if (res.status === 401) {
+        clearLocalAuth();
+        throw new AuthExpiredError();
+      }
+      if (!res.ok) {
+        let body: any = null;
+        try { body = await res.json(); } catch {}
+        throw new Error(body?.error ?? `token endpoint failed: ${res.status}`);
+      }
+      const data = (await res.json()) as { access_token: string; expires_in: number };
+      // Refresh the profile from the cookie in case it changed.
+      const profile = readProfileFromCookie();
+      if (profile) userProfile = profile;
+      storeToken(data.access_token, data.expires_in);
+      return data.access_token;
+    } finally {
+      clearTimeout(timer);
+    }
+  })();
 
-  return Promise.race([
-    tokenPromise,
-    new Promise<string>((_, reject) =>
-      setTimeout(
-        () => reject(new Error('Tiempo agotado pidiendo token a Google. ¿Cookies bloqueadas? Toca el indicador de sync para reintentar de forma interactiva.')),
-        TOKEN_TIMEOUT_MS,
-      ),
-    ),
-  ]);
+  try {
+    return await inFlightTokenRequest;
+  } finally {
+    inFlightTokenRequest = null;
+  }
 }
 
-/** Force a re-consent flow (used after a 403 from Drive). */
-export async function reconsent(): Promise<string> {
-  memoryToken = null;
-  try { localStorage.removeItem(STORAGE_KEY); } catch {}
-  return getAccessToken(true);
-}
-
-export async function signIn(): Promise<UserProfile> {
-  await getAccessToken(true);
-  return getCurrentUser()!;
+/** Sanitized identifier for the signed-in user, used to prefix per-user
+ *  localStorage keys and the OPFS file name so two people sharing the same
+ *  browser profile (e.g. a shared family tablet) don't clobber each
+ *  other's local caches. Falls back to 'anon' when nobody is signed in. */
+export function getStoragePrefix(): string {
+  const email = getCurrentUser()?.email;
+  if (!email) return 'anon';
+  return email.replace(/[^a-zA-Z0-9]/g, '_');
 }
 
 export async function signOut(): Promise<void> {
-  const cached = readCachedToken();
-  if (cached?.token) {
-    await loadGis().catch(() => {});
-    try {
-      window.google?.accounts.oauth2.revoke(cached.token);
-    } catch {}
-  }
-  memoryToken = null;
-  userProfile = null;
-  if (refreshTimer) { clearTimeout(refreshTimer); refreshTimer = null; }
   try {
-    localStorage.removeItem(STORAGE_KEY);
-  } catch {}
+    await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' });
+  } catch {
+    // best-effort — still clear local state
+  }
+  clearLocalAuth();
 }

@@ -10,7 +10,8 @@
     "build": "astro build",
     "preview": "astro preview",
     "astro": "astro",
-    "export-json": "tsx scripts/export-to-json.ts"
+    "export-json": "tsx scripts/export-to-json.ts",
+    "test": "NODE_OPTIONS=--no-experimental-webstorage vitest run"
   },
   "dependencies": {
     "@astrojs/react": "^5.0.3",
@@ -28,6 +29,8 @@
     "tailwindcss": "^4.2.4"
   },
   "devDependencies": {
-    "tsx": "^4.21.0"
+    "happy-dom": "^20.14.0",
+    "tsx": "^4.21.0",
+    "vitest": "^4.1.11"
   }
 }
