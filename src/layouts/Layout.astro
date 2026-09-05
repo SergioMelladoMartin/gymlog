@@ -5,6 +5,8 @@ import SideNav from '../components/SideNav';
 import SyncStatus from '../components/SyncStatus';
 import Onboarding from '../components/Onboarding';
 import UIHost from '../components/ui/UIHost';
+import BottomNav from '../components/BottomNav';
+import HeaderAvatar from '../components/HeaderAvatar';
 
 interface Props {
   title?: string;
@@ -132,7 +134,7 @@ const navTitleKey = {
         {activeNav !== 'login' && (
           <button
             type="button"
-            class="grid h-9 w-9 place-items-center rounded-lg border border-border bg-elevated/60 text-fg transition hover:bg-elevated lg:hidden"
+            class="hidden h-9 w-9 place-items-center rounded-lg border border-border bg-elevated/60 text-fg transition hover:bg-elevated"
             aria-label="Abrir menú"
             onclick="window.dispatchEvent(new CustomEvent('gymlog:open-sidenav'))"
           >
@@ -155,14 +157,18 @@ const navTitleKey = {
           </a>
           <span class="truncate text-[15px] font-semibold tracking-tight" data-navtitle-key={navTitleKey}>{navTitle}</span>
         </div>
+        {activeNav !== 'login' && <HeaderAvatar client:only="react" transition:persist="header-avatar" />}
         {activeNav !== 'login' && <SyncStatus client:only="react" transition:persist="sync-status" />}
       </div>
     </header>
 
-    <main class="mx-auto max-w-3xl px-4 py-6" transition:animate={fade({ duration: '0.2s' })}>
+    <main class="mx-auto max-w-3xl px-4 py-6 pb-24 lg:pb-6" transition:animate={fade({ duration: '0.2s' })}>
       <slot />
     </main>
     {activeNav !== 'login' && <Onboarding client:only="react" />}
+    {activeNav !== 'login' && (
+      <BottomNav client:only="react" transition:persist="bottom-nav" active={activeNav as any} />
+    )}
     <UIHost client:only="react" transition:persist="ui-host" />
   </body>
 </html>

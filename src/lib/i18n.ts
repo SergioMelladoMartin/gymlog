@@ -291,6 +291,37 @@ const ES: Dict = {
   'picker.resultCountPlural': '{n} resultados',
   'pr.weightUnlocked': 'Peso nuevo desbloqueado',
   'pr.repsRecord': 'Récord de repeticiones',
+
+  // Bottom tab bar (mobile)
+  'tab.today': 'Hoy',
+  'tab.calendar': 'Calendario',
+  'tab.diary': 'Diario',
+  'tab.exercises': 'Ejercicios',
+  'tab.stats': 'Stats',
+
+  // Avatar menu (mobile header)
+  'menu.profile': 'Perfil',
+  'menu.settings': 'Ajustes',
+  'menu.logout': 'Salir',
+  'menu.openUserMenu': 'Abrir menú de usuario',
+
+  // Day hero / weekly goal ring
+  'day.weekProgress': '{done} de {goal} días esta semana',
+  'day.weekGoalLabel': 'Objetivo semanal',
+  'day.addExercise': 'Añadir ejercicio',
+
+  // Rest timer
+  'timer.rest': 'Descanso',
+  'timer.auto': 'Auto',
+  'timer.autoHint': 'Inicia solo al añadir una serie',
+  'timer.plus30': '+30 s',
+  'timer.reset': 'Reiniciar',
+  'timer.skip': 'Saltar',
+  'timer.done': '¡Descanso terminado!',
+  'timer.start': 'Iniciar temporizador',
+
+  // PR toast
+  'toast.newRecord': '🏆 Nuevo récord',
 };
 
 const EN: Dict = {
@@ -556,6 +587,37 @@ const EN: Dict = {
   'picker.resultCountPlural': '{n} results',
   'pr.weightUnlocked': 'New max weight unlocked',
   'pr.repsRecord': 'Rep record',
+
+  // Bottom tab bar (mobile)
+  'tab.today': 'Today',
+  'tab.calendar': 'Calendar',
+  'tab.diary': 'Diary',
+  'tab.exercises': 'Exercises',
+  'tab.stats': 'Stats',
+
+  // Avatar menu (mobile header)
+  'menu.profile': 'Profile',
+  'menu.settings': 'Settings',
+  'menu.logout': 'Sign out',
+  'menu.openUserMenu': 'Open user menu',
+
+  // Day hero / weekly goal ring
+  'day.weekProgress': '{done} of {goal} days this week',
+  'day.weekGoalLabel': 'Weekly goal',
+  'day.addExercise': 'Add exercise',
+
+  // Rest timer
+  'timer.rest': 'Rest',
+  'timer.auto': 'Auto',
+  'timer.autoHint': 'Starts on its own when you log a set',
+  'timer.plus30': '+30 s',
+  'timer.reset': 'Reset',
+  'timer.skip': 'Skip',
+  'timer.done': 'Rest done!',
+  'timer.start': 'Start timer',
+
+  // PR toast
+  'toast.newRecord': '🏆 New record',
 };
 
 const DICTS: Record<Lang, Dict> = { es: ES, en: EN };

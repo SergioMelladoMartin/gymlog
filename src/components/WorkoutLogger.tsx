@@ -16,6 +16,7 @@ import { useT } from '../hooks/useT';
 import { getLocale } from '../lib/i18n';
 import { useConfirm } from './ui/ConfirmDialog';
 import { toast } from './ui/Toast';
+import RestTimer from './RestTimer';
 
 function vibrate(pattern: number | number[]) {
   try { if ('vibrate' in navigator) navigator.vibrate(pattern); } catch {}
@@ -62,16 +63,6 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
   // cluttering the view when it was always-on.
   const [openAdderId, setOpenAdderId] = useState<number | null>(null);
   const [copying, setCopying] = useState(false);
-  // Rest timer: when the last set of THIS session was saved. Session-local on
-  // purpose — the FitNotes schema stores no time-of-day, only dates.
-  const [lastSetAt, setLastSetAt] = useState<number | null>(null);
-  const [, setTimerTick] = useState(0);
-
-  useEffect(() => {
-    if (!lastSetAt) return;
-    const id = setInterval(() => setTimerTick((x) => x + 1), 1000);
-    return () => clearInterval(id);
-  }, [lastSetAt]);
 
   // Sync incoming props when the parent finishes loading data from the
   // in-browser db. `useState(initialSets)` only reads props on first render,
@@ -126,10 +117,15 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
     const result = qCreateSet({ exercise_id: exerciseId, date, weight_kg: weight, reps });
     refreshSets();
     setPendingExerciseIds((prev) => prev.filter((id) => id !== exerciseId));
-    setLastSetAt(Date.now());
+    setSetTick((x) => x + 1);
     // Light tap on save, stronger triple-buzz if we just set a PR.
-    if (result?.pr_weight || result?.pr_reps) vibrate([20, 40, 20, 40, 40]);
-    else vibrate(10);
+    if (result?.pr_weight || result?.pr_reps) {
+      vibrate([20, 40, 20, 40, 40]);
+      const exName = exercises.find((e) => e.id === exerciseId)?.name ?? '';
+      announcePr(exName, weight, reps, t);
+    } else {
+      vibrate(10);
+    }
   }
 
   function addCardioSet(exerciseId: number, durationSec: number, distanceM: number) {
@@ -143,7 +139,7 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
     });
     refreshSets();
     setPendingExerciseIds((prev) => prev.filter((id) => id !== exerciseId));
-    setLastSetAt(Date.now());
+    setSetTick((x) => x + 1);
     vibrate(10);
   }
 
@@ -151,7 +147,7 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
     qDuplicateSet(setId);
     refreshSets();
     setEditingSetId(null);
-    setLastSetAt(Date.now());
+    setSetTick((x) => x + 1);
     vibrate(10);
   }
 
@@ -239,7 +235,6 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
   }
 
   const locale = getLocale(lang);
-  const restSecs = lastSetAt ? Math.floor((Date.now() - lastSetAt) / 1000) : 0;
 
   // PR summary for today
   const prTotals = useMemo(() => {
@@ -250,6 +245,17 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
     }
     return { w, r, any: w + r };
   }, [sets]);
+
+  // Rest timer: bumped after every logged set so <RestTimer> can auto-start
+  // when its "auto" toggle is on.
+  const [setTick, setSetTick] = useState(0);
+
+  // Listen for the "Hoy" hero FAB (mobile), which opens the same picker.
+  useEffect(() => {
+    const open = () => setPickerOpen(true);
+    window.addEventListener('gymlog:open-exercise-picker', open);
+    return () => window.removeEventListener('gymlog:open-exercise-picker', open);
+  }, []);
 
   return (
     <div className="flex flex-col gap-5">
@@ -352,28 +358,57 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
                       </span>
                     </div>
 
-                    <ol className="flex flex-col divide-y divide-border/60">
+                    <div className="no-scrollbar flex gap-2 overflow-x-auto px-4 py-3">
                       {exSets.map((s, i) => (
-                        <SetRow
+                        <SetChip
                           key={s.id}
                           set={s}
                           index={i}
                           cardio={cardio}
-                          editing={editingSetId === s.id}
-                          onStartEdit={() => setEditingSetId(s.id)}
-                          onCancelEdit={() => setEditingSetId(null)}
-                          onSave={async (patch) => {
-                            await updateSet(s.id, patch);
-                            setEditingSetId(null);
-                          }}
-                          onDelete={async () => {
-                            const ok = await confirm({ body: t('workout.confirmDeleteSet'), confirmLabel: t('action.delete'), destructive: true });
-                            if (ok) deleteSet(s.id);
-                          }}
-                          onDuplicate={() => duplicateSet(s.id)}
+                          active={editingSetId === s.id}
+                          onClick={() => setEditingSetId((cur) => (cur === s.id ? null : s.id))}
                         />
                       ))}
-                    </ol>
+                    </div>
+
+                    {editingSetId != null && exSets.some((s) => s.id === editingSetId) && (
+                      <div className="border-t border-border/60 bg-elevated/40 px-4 py-2.5">
+                        {(() => {
+                          const s = exSets.find((x) => x.id === editingSetId)!;
+                          return cardio ? (
+                            <EditCardioForm
+                              initialDuration={s.duration_seconds}
+                              initialDistance={s.distance_m}
+                              onCancel={() => setEditingSetId(null)}
+                              onSave={async (dur, dist) => {
+                                await updateSet(s.id, { duration_seconds: dur, distance_m: dist });
+                                setEditingSetId(null);
+                              }}
+                              onDuplicate={() => duplicateSet(s.id)}
+                              onDelete={async () => {
+                                const ok = await confirm({ body: t('workout.confirmDeleteSet'), confirmLabel: t('action.delete'), destructive: true });
+                                if (ok) { deleteSet(s.id); setEditingSetId(null); }
+                              }}
+                            />
+                          ) : (
+                            <EditWeightForm
+                              initialWeight={s.weight_kg}
+                              initialReps={s.reps}
+                              onCancel={() => setEditingSetId(null)}
+                              onSave={async (w, r) => {
+                                await updateSet(s.id, { weight_kg: w, reps: r });
+                                setEditingSetId(null);
+                              }}
+                              onDuplicate={() => duplicateSet(s.id)}
+                              onDelete={async () => {
+                                const ok = await confirm({ body: t('workout.confirmDeleteSet'), confirmLabel: t('action.delete'), destructive: true });
+                                if (ok) { deleteSet(s.id); setEditingSetId(null); }
+                              }}
+                            />
+                          );
+                        })()}
+                      </div>
+                    )}
                   </>
                 )}
 
@@ -388,16 +423,6 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
                     >
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
                     </button>
-                    {lastSetAt && (
-                      <div className="mb-2 flex items-center gap-1.5 text-[11px] text-muted" title={t('workout.restTimer')}>
-                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <circle cx="12" cy="12" r="10" />
-                          <polyline points="12 6 12 12 16 14" />
-                        </svg>
-                        <span className="font-semibold tabular-nums text-fg">{formatDuration(restSecs)}</span>
-                        {t('workout.restTimer').toLowerCase()}
-                      </div>
-                    )}
                     {cardio ? (
                       <QuickAddCardio exerciseId={exerciseId} onAdd={addCardioSet} lastSets={lastExSets} />
                     ) : (
@@ -444,7 +469,31 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
           onCreate={createExercise}
         />
       )}
+
+      <RestTimer triggerTick={setTick} />
     </div>
+  );
+}
+
+/** Build & queue the "new record" celebratory toast — pr-shine sweep plus a
+ *  12-piece CSS confetti burst (both skipped automatically under
+ *  prefers-reduced-motion via the .pr-shine/.pr-confetti CSS rules). */
+function announcePr(
+  exerciseName: string,
+  weight: number,
+  reps: number,
+  t: (key: string, vars?: Record<string, string | number>) => string,
+) {
+  toast.custom(
+    <div className="pr-shine pr-confetti relative flex items-center gap-2 overflow-visible">
+      {Array.from({ length: 12 }).map((_, i) => (
+        <span key={i} className="confetti-piece" aria-hidden="true" />
+      ))}
+      <span className="relative z-10 font-semibold text-fg">
+        {t('toast.newRecord')} · {exerciseName} · {formatKg(weight)} kg × {reps}
+      </span>
+    </div>,
+    { duration: 2500 },
   );
 }
 
@@ -835,110 +884,53 @@ function ExercisePicker({
   );
 }
 
-function SetRow({
+/** Horizontal, scrollable chip for one logged set ("80 kg × 8"). Tapping it
+ *  toggles inline editing (rendered by the parent, below the chip strip).
+ *  A PR badge floats above the chip when this set unlocked a record. */
+function SetChip({
   set,
   index,
   cardio,
-  editing,
-  onStartEdit,
-  onCancelEdit,
-  onSave,
-  onDelete,
-  onDuplicate,
+  active,
+  onClick,
 }: {
   set: TrainingSet;
   index: number;
   cardio: boolean;
-  editing: boolean;
-  onStartEdit: () => void;
-  onCancelEdit: () => void;
-  onSave: (patch: Partial<Pick<TrainingSet, 'weight_kg' | 'reps' | 'duration_seconds' | 'distance_m'>>) => void | Promise<void>;
-  onDelete: () => void;
-  onDuplicate: () => void;
+  active: boolean;
+  onClick: () => void;
 }) {
   const { t } = useT();
-  if (editing) {
-    return (
-      <li className="bg-elevated/40 px-4 py-2.5">
-        {cardio ? (
-          <EditCardioForm
-            initialDuration={set.duration_seconds}
-            initialDistance={set.distance_m}
-            onCancel={onCancelEdit}
-            onSave={(dur, dist) => onSave({ duration_seconds: dur, distance_m: dist })}
-            onDuplicate={onDuplicate}
-          />
-        ) : (
-          <EditWeightForm
-            initialWeight={set.weight_kg}
-            initialReps={set.reps}
-            onCancel={onCancelEdit}
-            onSave={(w, r) => onSave({ weight_kg: w, reps: r })}
-            onDuplicate={onDuplicate}
-          />
-        )}
-      </li>
-    );
-  }
-
   const isOptimistic = set.id < 0;
+  const hasPr = !cardio && (set.pr_weight || set.pr_reps);
   return (
-    <li
-      className={`row-in group flex items-center justify-between gap-3 px-4 py-2.5 text-sm transition hover:bg-elevated/40 ${isOptimistic ? 'opacity-80' : ''}`}
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={`${t('workout.editSet')} ${index + 1}`}
+      className={`row-in relative flex shrink-0 items-center gap-1.5 rounded-xl border px-3 py-2 text-sm tabular-nums transition active:scale-[0.97] ${
+        active
+          ? 'border-accent bg-accent-soft text-fg'
+          : 'border-border bg-elevated/60 text-fg hover:border-strong'
+      } ${isOptimistic ? 'opacity-80' : ''}`}
     >
-      <button
-        type="button"
-        onClick={onStartEdit}
-        className="flex min-w-0 flex-1 items-center gap-3 text-left"
-      >
-        <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-elevated text-[11px] font-semibold text-muted tabular-nums">
-          {index + 1}
+      {hasPr && (
+        <span className="pr-pop absolute -right-1.5 -top-1.5 grid h-4 w-4 place-items-center rounded-full bg-accent text-ink" title={t('pr.weightUnlocked')}>
+          <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor"><path d="M7.5 2h9l1.5 3h3.5l-2.5 5a6 6 0 0 1-4.4 3.85L14 18h2v2H8v-2h2l-.6-4.15A6 6 0 0 1 5 10L2.5 5H6z"/></svg>
         </span>
-        {cardio ? (
-          <span className="flex items-baseline tabular-nums">
-            <span className="w-16 text-right text-lg font-semibold">{formatDuration(set.duration_seconds)}</span>
-            {set.distance_m > 0 ? (
-              <>
-                <span className="mx-2 text-muted">·</span>
-                <span className="text-right text-lg font-semibold">{formatDistance(set.distance_m)}</span>
-              </>
-            ) : null}
-          </span>
-        ) : (
-          <span className="flex items-baseline tabular-nums">
-            <span className="w-14 text-right text-lg font-semibold">{formatKg(set.weight_kg)}</span>
-            <span className="ml-1 w-7 text-left text-[10px] uppercase tracking-wider text-muted">kg</span>
-            <span className="mx-1 text-muted">·</span>
-            <span className="w-8 text-right text-lg font-semibold">{set.reps}</span>
-            <span className="ml-1 text-[10px] uppercase tracking-wider text-muted">reps</span>
-          </span>
-        )}
-        {!cardio && <PrBadges set={set} />}
-      </button>
-      <div className="flex shrink-0 items-center gap-1">
-        <button
-          type="button"
-          onClick={onStartEdit}
-          className="grid h-8 w-8 place-items-center rounded-md text-muted opacity-100 transition hover:bg-card hover:text-fg sm:opacity-0 sm:group-hover:opacity-100"
-          aria-label={t('workout.editSet')}
-          title={t('workout.edit')}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-          </svg>
-        </button>
-        <button
-          type="button"
-          onClick={onDelete}
-          className="grid h-8 w-8 place-items-center rounded-md text-muted opacity-100 transition hover:bg-danger/10 hover:text-danger sm:opacity-0 sm:group-hover:opacity-100"
-          aria-label={t('workout.deleteSet')}
-          title={t('workout.delete')}
-        >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
-        </button>
-      </div>
-    </li>
+      )}
+      <span className="text-[10px] font-semibold text-muted">{index + 1}</span>
+      {cardio ? (
+        <span className="font-semibold">
+          {formatDuration(set.duration_seconds)}
+          {set.distance_m > 0 ? ` · ${formatDistance(set.distance_m)}` : ''}
+        </span>
+      ) : (
+        <span className="font-semibold">
+          {formatKg(set.weight_kg)} <span className="text-[11px] font-normal text-muted">kg</span> × {set.reps}
+        </span>
+      )}
+    </button>
   );
 }
 
@@ -948,12 +940,14 @@ function EditWeightForm({
   onCancel,
   onSave,
   onDuplicate,
+  onDelete,
 }: {
   initialWeight: number;
   initialReps: number;
   onCancel: () => void;
   onSave: (weight: number, reps: number) => void | Promise<void>;
   onDuplicate?: () => void;
+  onDelete?: () => void;
 }) {
   const { t } = useT();
   const [w, setW] = useState(String(initialWeight));
@@ -991,19 +985,31 @@ function EditWeightForm({
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
         </button>
       </div>
-      {onDuplicate && (
-        <button
-          type="button"
-          onClick={onDuplicate}
-          className="inline-flex items-center justify-center gap-1.5 self-start rounded-md border border-border bg-elevated/50 px-2.5 py-1 text-[11px] font-medium text-muted transition hover:bg-elevated hover:text-fg"
-        >
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-          </svg>
-          {t('action.duplicate')}
-        </button>
-      )}
+      <div className="flex items-center gap-1.5">
+        {onDuplicate && (
+          <button
+            type="button"
+            onClick={onDuplicate}
+            className="inline-flex items-center justify-center gap-1.5 rounded-md border border-border bg-elevated/50 px-2.5 py-1 text-[11px] font-medium text-muted transition hover:bg-elevated hover:text-fg"
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+            </svg>
+            {t('action.duplicate')}
+          </button>
+        )}
+        {onDelete && (
+          <button
+            type="button"
+            onClick={onDelete}
+            className="inline-flex items-center justify-center gap-1.5 rounded-md border border-border bg-elevated/50 px-2.5 py-1 text-[11px] font-medium text-danger transition hover:bg-danger/10"
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
+            {t('action.delete')}
+          </button>
+        )}
+      </div>
     </form>
   );
 }
@@ -1014,12 +1020,14 @@ function EditCardioForm({
   onCancel,
   onSave,
   onDuplicate,
+  onDelete,
 }: {
   initialDuration: number;
   initialDistance: number;
   onCancel: () => void;
   onSave: (durationSec: number, distanceM: number) => void | Promise<void>;
   onDuplicate?: () => void;
+  onDelete?: () => void;
 }) {
   const { t } = useT();
   const [d, setD] = useState(initialDuration ? formatDuration(initialDuration) : '');
@@ -1058,19 +1066,31 @@ function EditCardioForm({
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
         </button>
       </div>
-      {onDuplicate && (
-        <button
-          type="button"
-          onClick={onDuplicate}
-          className="inline-flex items-center justify-center gap-1.5 self-start rounded-md border border-border bg-elevated/50 px-2.5 py-1 text-[11px] font-medium text-muted transition hover:bg-elevated hover:text-fg"
-        >
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-          </svg>
-          {t('action.duplicate')}
-        </button>
-      )}
+      <div className="flex items-center gap-1.5">
+        {onDuplicate && (
+          <button
+            type="button"
+            onClick={onDuplicate}
+            className="inline-flex items-center justify-center gap-1.5 rounded-md border border-border bg-elevated/50 px-2.5 py-1 text-[11px] font-medium text-muted transition hover:bg-elevated hover:text-fg"
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+            </svg>
+            {t('action.duplicate')}
+          </button>
+        )}
+        {onDelete && (
+          <button
+            type="button"
+            onClick={onDelete}
+            className="inline-flex items-center justify-center gap-1.5 rounded-md border border-border bg-elevated/50 px-2.5 py-1 text-[11px] font-medium text-danger transition hover:bg-danger/10"
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
+            {t('action.delete')}
+          </button>
+        )}
+      </div>
     </form>
   );
 }

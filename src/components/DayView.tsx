@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   getCategories,
   getExercises,
   getSetsForDate,
+  getTrainingDaysInRange,
   getWorkoutComment,
   todayISO,
   type ExerciseExtra,
@@ -14,6 +16,21 @@ import { useDatabase } from '../hooks/useDatabase';
 import { useT } from '../hooks/useT';
 import { getLocale } from '../lib/i18n';
 
+const LS_WEEKLY_GOAL = 'gymlog-weekly-goal';
+
+function mondayOf(iso: string): string {
+  const d = new Date(iso + 'T00:00:00');
+  const dow = (d.getDay() + 6) % 7; // Mon=0..Sun=6
+  d.setDate(d.getDate() - dow);
+  return isoOf(d);
+}
+function isoOf(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${dd}`;
+}
+
 export default function DayView() {
   const ready = useDatabase();
   const urlDate = typeof window !== 'undefined'
@@ -24,6 +41,8 @@ export default function DayView() {
   const [exercises, setExercises] = useState<ExerciseExtra[]>([]);
   const [sets, setSets] = useState<(TrainingSetEx & any)[]>([]);
   const [comment, setComment] = useState<string | null>(null);
+  const [weekDaysTrained, setWeekDaysTrained] = useState(0);
+  const [weeklyGoal, setWeeklyGoal] = useState(4);
 
   useEffect(() => {
     if (!ready) return;
@@ -31,7 +50,17 @@ export default function DayView() {
     setExercises(getExercises());
     setSets(getSetsForDate(nowDate));
     setComment(getWorkoutComment(nowDate));
-  }, [ready, nowDate]);
+    try {
+      const today = todayISO();
+      const monday = mondayOf(today);
+      const sunday = isoOf(new Date(new Date(monday + 'T00:00:00').getTime() + 6 * 86_400_000));
+      setWeekDaysTrained(getTrainingDaysInRange(monday, sunday).length);
+    } catch { setWeekDaysTrained(0); }
+    try {
+      const stored = Number(localStorage.getItem(LS_WEEKLY_GOAL));
+      setWeeklyGoal(stored > 0 ? stored : 4);
+    } catch { setWeeklyGoal(4); }
+  }, [ready, nowDate, sets.length]);
 
   const { totalVol, uniqueEx, hasPr } = useMemo(() => {
     const vol = sets.reduce((acc, s: any) => acc + s.weight_kg * s.reps, 0);
@@ -44,7 +73,15 @@ export default function DayView() {
 
   return (
     <>
-      <DayHeader date={nowDate} setCount={sets.length} exerciseCount={uniqueEx} volume={totalVol} hasPr={hasPr} />
+      <DayHero
+        date={nowDate}
+        setCount={sets.length}
+        exerciseCount={uniqueEx}
+        volume={totalVol}
+        hasPr={hasPr}
+        weekDaysTrained={weekDaysTrained}
+        weeklyGoal={weeklyGoal}
+      />
       <WorkoutLogger
         key={nowDate}
         date={nowDate}
@@ -54,13 +91,49 @@ export default function DayView() {
         initialComment={comment}
         onSetsChange={(fresh) => setSets(fresh as any)}
       />
+      <AddExerciseFab />
     </>
   );
 }
 
-// ─── Day header (slim, uses prev/next links) ────────────────────────────
-function DayHeader({ date, setCount, exerciseCount, volume, hasPr }: {
+/** FAB — mobile only, opens the exercise picker already owned by
+ *  WorkoutLogger via a window event (avoids prop-drilling picker state up
+ *  through DayView). Portalled to <body>: the header's glass-bar creates a
+ *  containing block for `position: fixed`, which would otherwise trap a
+ *  fixed FAB declared under it. */
+function AddExerciseFab() {
+  const { t } = useT();
+  const [mounted, setMounted] = useState(false);
+  const [isDesktop, setIsDesktop] = useState(() =>
+    typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches,
+  );
+  useEffect(() => {
+    setMounted(true);
+    const mq = window.matchMedia('(min-width: 1024px)');
+    const update = () => setIsDesktop(mq.matches);
+    update();
+    mq.addEventListener('change', update);
+    return () => mq.removeEventListener('change', update);
+  }, []);
+  if (!mounted || isDesktop) return null;
+  return createPortal(
+    <button
+      type="button"
+      onClick={() => window.dispatchEvent(new CustomEvent('gymlog:open-exercise-picker'))}
+      aria-label={t('day.addExercise')}
+      className="btn-accent accent-glow fixed z-40 grid h-14 w-14 place-items-center rounded-full active:scale-95"
+      style={{ right: '1rem', bottom: 'calc(env(safe-area-inset-bottom) + 9.5rem)' }}
+    >
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.75" strokeLinecap="round"><path d="M12 5v14" /><path d="M5 12h14" /></svg>
+    </button>,
+    document.body,
+  );
+}
+
+// ─── "Hoy" hero: big day number + weekly-goal ring + stat tiles ─────────
+function DayHero({ date, setCount, exerciseCount, volume, hasPr, weekDaysTrained, weeklyGoal }: {
   date: string; setCount: number; exerciseCount: number; volume: number; hasPr: boolean;
+  weekDaysTrained: number; weeklyGoal: number;
 }) {
   const { t, lang } = useT();
   const locale = getLocale(lang);
@@ -86,20 +159,27 @@ function DayHeader({ date, setCount, exerciseCount, volume, hasPr }: {
   const prevHref = `/day?d=${iso(prev)}`;
   const nextHref = `/day?d=${iso(next)}`;
 
+  const goal = Math.max(1, weeklyGoal);
+  const pct = Math.max(0, Math.min(1, weekDaysTrained / goal));
+  const r = 26;
+  const circ = 2 * Math.PI * r;
+  const dash = circ * pct;
+  const reachedGoal = weekDaysTrained >= goal;
+
   return (
     <section className="card relative mb-5 overflow-hidden">
       {isToday && <div className="absolute inset-x-0 top-0 h-0.5 bg-accent" />}
 
-      <div className="flex items-center justify-between gap-2 px-4 pt-4 pb-3">
+      <div className="flex items-center gap-3 px-4 pt-4 pb-3">
         <a href={prevHref}
           className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-border bg-elevated/60 text-muted transition hover:bg-elevated hover:text-fg"
           aria-label={t('day.prevDay')}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
         </a>
 
-        <div className="flex min-w-0 flex-1 flex-col items-center text-center">
+        <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <span className="text-xs font-medium uppercase tracking-wider text-muted capitalize">{weekday}</span>
+            <span className="section-title capitalize">{weekday}</span>
             {isToday && <span className="rounded-full bg-accent px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-ink">{t('nav.today')}</span>}
             {hasPr && (
               <span className="grid h-4 w-4 place-items-center rounded-full bg-accent text-ink" title={t('day.pr')}>
@@ -107,9 +187,26 @@ function DayHeader({ date, setCount, exerciseCount, volume, hasPr }: {
               </span>
             )}
           </div>
-          <h1 className="text-3xl font-semibold leading-tight tracking-tight tabular-nums capitalize">
-            {dayNum} {month}{!isThisYear ? ` ${year}` : ''}
-          </h1>
+          <div className="mt-0.5 flex items-baseline gap-2">
+            <span className="text-[48px] font-bold leading-none tracking-tight tabular-nums">{dayNum}</span>
+            <span className="text-lg font-medium capitalize text-muted">{month}{!isThisYear ? ` ${year}` : ''}</span>
+          </div>
+        </div>
+
+        <div className="relative shrink-0" title={t('day.weekProgress', { done: weekDaysTrained, goal })}>
+          <svg width="64" height="64" viewBox="0 0 64 64" className="-rotate-90">
+            <circle cx="32" cy="32" r={r} fill="none" stroke="var(--color-border)" strokeWidth="5" />
+            <circle
+              cx="32" cy="32" r={r} fill="none"
+              stroke={reachedGoal ? 'var(--color-accent)' : 'var(--color-accent)'}
+              strokeWidth="5" strokeLinecap="round"
+              strokeDasharray={circ} strokeDashoffset={circ - dash}
+              className="resttimer-ring"
+            />
+          </svg>
+          <div className="absolute inset-0 grid place-items-center">
+            <span className="text-sm font-bold tabular-nums">{weekDaysTrained}/{goal}</span>
+          </div>
         </div>
 
         <a href={nextHref}
@@ -120,16 +217,16 @@ function DayHeader({ date, setCount, exerciseCount, volume, hasPr }: {
       </div>
 
       {setCount > 0 ? (
-        <div className="grid grid-cols-3 border-t border-border">
-          <div className="border-r border-border px-3 py-3 text-center">
+        <div className="flex gap-2 border-t border-border px-4 py-3">
+          <div className="stat-tile flex-1 text-center">
             <div className="text-xl font-semibold tabular-nums tracking-tight">{exerciseCount}</div>
             <div className="text-[10px] font-medium uppercase tracking-wider text-muted">{t('day.statExercises')}</div>
           </div>
-          <div className="border-r border-border px-3 py-3 text-center">
+          <div className="stat-tile flex-1 text-center">
             <div className="text-xl font-semibold tabular-nums tracking-tight">{setCount}</div>
             <div className="text-[10px] font-medium uppercase tracking-wider text-muted">{t('day.statSets')}</div>
           </div>
-          <div className="px-3 py-3 text-center">
+          <div className="stat-tile flex-1 text-center">
             <div className="text-xl font-semibold tabular-nums tracking-tight">
               {Math.round(volume).toLocaleString(locale)}<span className="ml-0.5 text-xs font-medium text-muted">kg</span>
             </div>
