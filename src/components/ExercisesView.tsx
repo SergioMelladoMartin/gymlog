@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { useDatabase } from '../hooks/useDatabase';
+import BottomSheet from './ui/BottomSheet';
 import { createExercise as qCreateExercise, getCategories, getExercises, type ExerciseExtra } from '../lib/queries';
 import type { Category } from '../lib/types';
 import ExerciseList from './ExerciseList';
 import { useT } from '../hooks/useT';
 import { toast } from './ui/Toast';
+import { ExercisesSkeleton } from './ui/Skeleton';
 
 export default function ExercisesView() {
   const { t } = useT();
@@ -29,7 +30,7 @@ export default function ExercisesView() {
   const groupParam = url?.searchParams.get('group');
   const groupId = groupParam ? Number(groupParam) : null;
 
-  if (!ready) return <div className="flex min-h-[50vh] items-center justify-center text-muted"><div className="h-8 w-8 animate-spin rounded-full border-2 border-border border-t-accent" /></div>;
+  if (!ready) return <ExercisesSkeleton />;
 
   const countByCat = new Map<number, number>();
   for (const e of exercises) countByCat.set(e.category_id, (countByCat.get(e.category_id) ?? 0) + 1);
@@ -61,7 +62,7 @@ export default function ExercisesView() {
           <button
             type="button"
             onClick={() => setCreatorOpen(true)}
-            className="btn-accent inline-flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-2 text-xs"
+            className="btn-accent inline-flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-2 text-xs transition active:scale-[0.97]"
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M12 5v14" /><path d="M5 12h14" /></svg>
             {t('exercise.createBtn')}
@@ -136,18 +137,6 @@ function CreateExerciseModal({
   const [name, setName] = useState('');
   const [categoryId, setCategoryId] = useState<number | null>(defaultCategoryId);
   const [submitting, setSubmitting] = useState(false);
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', onKey);
-    document.body.style.overflow = 'hidden';
-    return () => {
-      window.removeEventListener('keydown', onKey);
-      document.body.style.overflow = '';
-    };
-  }, [onClose]);
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -163,27 +152,10 @@ function CreateExerciseModal({
     }
   }
 
-  if (!mounted) return null;
-
-  const overlay = (
-    <div
-      className="fixed inset-0 z-[80] flex items-center justify-center p-4"
-      style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(6px)' }}
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-    >
-      <form
-        onSubmit={submit}
-        onClick={(e) => e.stopPropagation()}
-        className="glass-float w-full max-w-md rounded-2xl p-5"
-      >
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-lg font-semibold tracking-tight">{t('exercise.createBtn')}</h2>
-          <button type="button" onClick={onClose} aria-label={t('action.close')} className="grid h-7 w-7 place-items-center rounded-md text-muted transition hover:bg-elevated hover:text-fg">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
-          </button>
-        </div>
+  return (
+    <BottomSheet open onClose={onClose} title={t('exercise.createBtn')}>
+      <form onSubmit={submit} className="p-5 pt-2 lg:pt-1">
+        <h2 className="mb-3 text-lg font-semibold tracking-tight lg:hidden">{t('exercise.createBtn')}</h2>
         <input
           autoFocus
           value={name}
@@ -200,7 +172,7 @@ function CreateExerciseModal({
                 type="button"
                 key={c.id}
                 onClick={() => setCategoryId(c.id)}
-                className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${active ? 'text-fg' : 'text-muted hover:text-fg'}`}
+                className={`rounded-full px-3 py-1.5 text-xs font-medium transition active:scale-[0.97] ${active ? 'text-fg' : 'text-muted hover:text-fg'}`}
                 style={{
                   background: active ? `${c.color}33` : 'var(--color-elevated)',
                   boxShadow: active ? `inset 0 0 0 1px ${c.color}80` : undefined,
@@ -216,21 +188,19 @@ function CreateExerciseModal({
           <button
             type="button"
             onClick={onClose}
-            className="flex-1 rounded-lg border border-border bg-elevated/60 py-2.5 text-sm font-medium text-muted transition hover:bg-elevated hover:text-fg"
+            className="flex-1 rounded-lg border border-border bg-elevated/60 py-2.5 text-sm font-medium text-muted transition hover:bg-elevated hover:text-fg active:scale-[0.97]"
           >
             {t('action.cancel')}
           </button>
           <button
             type="submit"
             disabled={!name.trim() || !categoryId || submitting}
-            className="btn-accent flex-[2] rounded-lg py-2.5 text-sm disabled:opacity-40"
+            className="btn-accent flex-[2] rounded-lg py-2.5 text-sm transition active:scale-[0.97] disabled:opacity-40"
           >
             {submitting ? t('exercise.creating') : t('exercise.createAndOpen')}
           </button>
         </div>
       </form>
-    </div>
+    </BottomSheet>
   );
-
-  return createPortal(overlay, document.body);
 }

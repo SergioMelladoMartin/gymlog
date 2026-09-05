@@ -4,6 +4,7 @@ import { getDayPrCounts } from '../lib/queries';
 import { getDb } from '../lib/sqlite';
 import { useT } from '../hooks/useT';
 import { getLocale } from '../lib/i18n';
+import { DiarySkeleton } from './ui/Skeleton';
 
 interface DayRow {
   date: string;
@@ -135,7 +136,7 @@ export default function DiaryView() {
     }
   }, [ready, before, after]);
 
-  if (!ready) return <div className="flex min-h-[50vh] items-center justify-center text-muted"><div className="h-8 w-8 animate-spin rounded-full border-2 border-border border-t-accent" /></div>;
+  if (!ready) return <DiarySkeleton />;
 
   const oldestDate = days.at(-1)?.date;
   const newestDate = days[0]?.date;

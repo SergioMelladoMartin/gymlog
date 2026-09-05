@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { getCurrentUser, signOut, type UserProfile } from '../lib/auth';
 import { useT } from '../hooks/useT';
+import BottomSheet from './ui/BottomSheet';
 
 /**
  * Mobile-only avatar button in the header (top-right, next to the sync
@@ -23,7 +23,6 @@ export default function HeaderAvatar() {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [open, setOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
-  const [pos, setPos] = useState<{ top: number; right: number }>({ top: 56, right: 16 });
 
   useEffect(() => {
     setMounted(true);
@@ -34,28 +33,6 @@ export default function HeaderAvatar() {
     mq.addEventListener('change', update);
     return () => mq.removeEventListener('change', update);
   }, []);
-
-  useEffect(() => {
-    if (!open) return;
-    function place() {
-      const r = btnRef.current?.getBoundingClientRect();
-      if (!r) return;
-      setPos({ top: r.bottom + 8, right: Math.max(8, window.innerWidth - r.right) });
-    }
-    place();
-    function onDocClick(e: MouseEvent) {
-      if (btnRef.current && !btnRef.current.contains(e.target as Node)) setOpen(false);
-    }
-    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') setOpen(false); }
-    window.addEventListener('resize', place);
-    document.addEventListener('mousedown', onDocClick);
-    window.addEventListener('keydown', onKey);
-    return () => {
-      window.removeEventListener('resize', place);
-      document.removeEventListener('mousedown', onDocClick);
-      window.removeEventListener('keydown', onKey);
-    };
-  }, [open]);
 
   if (!mounted || isDesktop) return null;
 
@@ -78,29 +55,24 @@ export default function HeaderAvatar() {
           <span className="grid h-8 w-8 place-items-center rounded-full bg-accent text-xs font-bold text-ink">{initial}</span>
         )}
       </button>
-      {open && createPortal(
-        <div
-          role="menu"
-          className="glass-float motion-safe:animate-[sheetIn_160ms_cubic-bezier(0.2,0.8,0.2,1)] fixed z-[70] w-44 overflow-hidden rounded-xl py-1 text-sm"
-          style={{ top: pos.top, right: pos.right }}
-        >
-          <a href="/profile" role="menuitem" className="flex items-center px-3 py-2 text-fg transition hover:bg-elevated">
+      <BottomSheet open={open} onClose={() => setOpen(false)}>
+        <div role="menu" className="flex flex-col py-1 text-sm">
+          <a href="/profile" role="menuitem" className="flex items-center px-5 py-3 text-fg transition hover:bg-elevated active:scale-[0.99]">
             {t('menu.profile')}
           </a>
-          <a href="/settings" role="menuitem" className="flex items-center px-3 py-2 text-fg transition hover:bg-elevated">
+          <a href="/settings" role="menuitem" className="flex items-center px-5 py-3 text-fg transition hover:bg-elevated active:scale-[0.99]">
             {t('menu.settings')}
           </a>
           <button
             type="button"
             role="menuitem"
             onClick={() => { setOpen(false); signOut().finally(() => { location.href = '/login'; }); }}
-            className="flex w-full items-center px-3 py-2 text-left text-danger transition hover:bg-danger/10"
+            className="flex w-full items-center px-5 py-3 text-left text-danger transition hover:bg-danger/10 active:scale-[0.99]"
           >
             {t('menu.logout')}
           </button>
-        </div>,
-        document.body,
-      )}
+        </div>
+      </BottomSheet>
     </>
   );
 }

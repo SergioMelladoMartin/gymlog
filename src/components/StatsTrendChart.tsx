@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Bar,
   BarChart,
@@ -42,7 +42,14 @@ export default function StatsTrendChart({
 }) {
   const { t, lang } = useT();
   const locale = getLocale(lang);
-  const colors = useMemo(readCssColors, []);
+  const [colors, setColors] = useState(readCssColors);
+
+  useEffect(() => {
+    setColors(readCssColors());
+    const obs = new MutationObserver(() => setColors(readCssColors()));
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'data-accent'] });
+    return () => obs.disconnect();
+  }, []);
 
   if (!data.length) {
     return (

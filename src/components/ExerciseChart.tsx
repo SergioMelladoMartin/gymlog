@@ -138,7 +138,7 @@ export default function ExerciseChart({ data }: { data: SessionPoint[] }) {
                 key={r.id}
                 type="button"
                 onClick={() => setRange(r.id)}
-                className={`shrink-0 rounded-full px-3 py-1 text-[11px] font-semibold transition ${
+                className={`shrink-0 rounded-full px-3 py-1 text-[11px] font-semibold transition active:scale-[0.97] ${
                   isActive
                     ? 'btn-accent'
                     : 'bg-elevated/50 text-muted hover:bg-elevated hover:text-fg'
@@ -155,7 +155,7 @@ export default function ExerciseChart({ data }: { data: SessionPoint[] }) {
               key={m.id}
               type="button"
               onClick={() => setMetric(m.id)}
-              className={`rounded-full px-3 py-1 text-[11px] font-medium transition ${
+              className={`rounded-full px-3 py-1 text-[11px] font-medium transition active:scale-[0.97] ${
                 metric === m.id
                   ? 'btn-accent'
                   : 'bg-elevated/50 text-muted hover:bg-elevated hover:text-fg'

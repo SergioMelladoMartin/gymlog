@@ -15,6 +15,7 @@ import WorkoutLogger from './WorkoutLogger';
 import { useDatabase } from '../hooks/useDatabase';
 import { useT } from '../hooks/useT';
 import { getLocale } from '../lib/i18n';
+import { DaySkeleton } from './ui/Skeleton';
 
 const LS_WEEKLY_GOAL = 'gymlog-weekly-goal';
 
@@ -69,7 +70,7 @@ export default function DayView() {
     return { totalVol: vol, uniqueEx: ex, hasPr: pr };
   }, [sets]);
 
-  if (!ready) return <LoadingSpinner />;
+  if (!ready) return <DaySkeleton />;
 
   return (
     <>
@@ -188,7 +189,7 @@ function DayHero({ date, setCount, exerciseCount, volume, hasPr, weekDaysTrained
             )}
           </div>
           <div className="mt-0.5 flex items-baseline gap-2">
-            <span className="text-[48px] font-bold leading-none tracking-tight tabular-nums">{dayNum}</span>
+            <span className="font-display text-[48px] font-bold leading-none tracking-tight tabular-nums">{dayNum}</span>
             <span className="text-lg font-medium capitalize text-muted">{month}{!isThisYear ? ` ${year}` : ''}</span>
           </div>
         </div>
@@ -219,15 +220,15 @@ function DayHero({ date, setCount, exerciseCount, volume, hasPr, weekDaysTrained
       {setCount > 0 ? (
         <div className="flex gap-2 border-t border-border px-4 py-3">
           <div className="stat-tile flex-1 text-center">
-            <div className="text-xl font-semibold tabular-nums tracking-tight">{exerciseCount}</div>
+            <div className="font-display text-xl font-semibold tabular-nums tracking-tight">{exerciseCount}</div>
             <div className="text-[10px] font-medium uppercase tracking-wider text-muted">{t('day.statExercises')}</div>
           </div>
           <div className="stat-tile flex-1 text-center">
-            <div className="text-xl font-semibold tabular-nums tracking-tight">{setCount}</div>
+            <div className="font-display text-xl font-semibold tabular-nums tracking-tight">{setCount}</div>
             <div className="text-[10px] font-medium uppercase tracking-wider text-muted">{t('day.statSets')}</div>
           </div>
           <div className="stat-tile flex-1 text-center">
-            <div className="text-xl font-semibold tabular-nums tracking-tight">
+            <div className="font-display text-xl font-semibold tabular-nums tracking-tight">
               {Math.round(volume).toLocaleString(locale)}<span className="ml-0.5 text-xs font-medium text-muted">kg</span>
             </div>
             <div className="text-[10px] font-medium uppercase tracking-wider text-muted">{t('day.statVolume')}</div>
@@ -248,12 +249,3 @@ function DayHero({ date, setCount, exerciseCount, volume, hasPr, weekDaysTrained
   );
 }
 
-function LoadingSpinner() {
-  const { t } = useT();
-  return (
-    <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3 text-muted">
-      <div className="h-8 w-8 animate-spin rounded-full border-2 border-border border-t-accent" />
-      <span className="text-sm">{t('day.loading')}</span>
-    </div>
-  );
-}

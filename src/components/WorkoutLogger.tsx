@@ -17,6 +17,7 @@ import { getLocale } from '../lib/i18n';
 import { useConfirm } from './ui/ConfirmDialog';
 import { toast } from './ui/Toast';
 import RestTimer from './RestTimer';
+import BottomSheet from './ui/BottomSheet';
 
 function vibrate(pattern: number | number[]) {
   try { if ('vibrate' in navigator) navigator.vibrate(pattern); } catch {}
@@ -371,44 +372,51 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
                       ))}
                     </div>
 
-                    {editingSetId != null && exSets.some((s) => s.id === editingSetId) && (
-                      <div className="border-t border-border/60 bg-elevated/40 px-4 py-2.5">
-                        {(() => {
-                          const s = exSets.find((x) => x.id === editingSetId)!;
-                          return cardio ? (
-                            <EditCardioForm
-                              initialDuration={s.duration_seconds}
-                              initialDistance={s.distance_m}
-                              onCancel={() => setEditingSetId(null)}
-                              onSave={async (dur, dist) => {
-                                await updateSet(s.id, { duration_seconds: dur, distance_m: dist });
-                                setEditingSetId(null);
-                              }}
-                              onDuplicate={() => duplicateSet(s.id)}
-                              onDelete={async () => {
-                                const ok = await confirm({ body: t('workout.confirmDeleteSet'), confirmLabel: t('action.delete'), destructive: true });
-                                if (ok) { deleteSet(s.id); setEditingSetId(null); }
-                              }}
-                            />
-                          ) : (
-                            <EditWeightForm
-                              initialWeight={s.weight_kg}
-                              initialReps={s.reps}
-                              onCancel={() => setEditingSetId(null)}
-                              onSave={async (w, r) => {
-                                await updateSet(s.id, { weight_kg: w, reps: r });
-                                setEditingSetId(null);
-                              }}
-                              onDuplicate={() => duplicateSet(s.id)}
-                              onDelete={async () => {
-                                const ok = await confirm({ body: t('workout.confirmDeleteSet'), confirmLabel: t('action.delete'), destructive: true });
-                                if (ok) { deleteSet(s.id); setEditingSetId(null); }
-                              }}
-                            />
-                          );
-                        })()}
+                    {/* grid-template-rows 0fr→1fr gives the edit form a smooth
+                        height transition instead of popping in/out (skipped
+                        entirely under prefers-reduced-motion via .rowgrid). */}
+                    <div className={`rowgrid grid ${editingSetId != null && exSets.some((s) => s.id === editingSetId) ? 'rowgrid-open' : ''}`}>
+                      <div className="min-h-0 overflow-hidden">
+                        {editingSetId != null && exSets.some((s) => s.id === editingSetId) && (
+                          <div className="border-t border-border/60 bg-elevated/40 px-4 py-2.5">
+                            {(() => {
+                              const s = exSets.find((x) => x.id === editingSetId)!;
+                              return cardio ? (
+                                <EditCardioForm
+                                  initialDuration={s.duration_seconds}
+                                  initialDistance={s.distance_m}
+                                  onCancel={() => setEditingSetId(null)}
+                                  onSave={async (dur, dist) => {
+                                    await updateSet(s.id, { duration_seconds: dur, distance_m: dist });
+                                    setEditingSetId(null);
+                                  }}
+                                  onDuplicate={() => duplicateSet(s.id)}
+                                  onDelete={async () => {
+                                    const ok = await confirm({ body: t('workout.confirmDeleteSet'), confirmLabel: t('action.delete'), destructive: true });
+                                    if (ok) { deleteSet(s.id); setEditingSetId(null); }
+                                  }}
+                                />
+                              ) : (
+                                <EditWeightForm
+                                  initialWeight={s.weight_kg}
+                                  initialReps={s.reps}
+                                  onCancel={() => setEditingSetId(null)}
+                                  onSave={async (w, r) => {
+                                    await updateSet(s.id, { weight_kg: w, reps: r });
+                                    setEditingSetId(null);
+                                  }}
+                                  onDuplicate={() => duplicateSet(s.id)}
+                                  onDelete={async () => {
+                                    const ok = await confirm({ body: t('workout.confirmDeleteSet'), confirmLabel: t('action.delete'), destructive: true });
+                                    if (ok) { deleteSet(s.id); setEditingSetId(null); }
+                                  }}
+                                />
+                              );
+                            })()}
+                          </div>
+                        )}
                       </div>
-                    )}
+                    </div>
                   </>
                 )}
 
@@ -684,22 +692,6 @@ function ExercisePicker({
   const [stepCategory, setStepCategory] = useState<number | null>(null); // null = group index
   const [creatorOpen, setCreatorOpen] = useState(false);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      if (creatorOpen) { setCreatorOpen(false); return; }
-      if (stepCategory !== null) { setStepCategory(null); return; }
-      if (query) { setQuery(''); return; }
-      onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    document.body.style.overflow = 'hidden';
-    return () => {
-      window.removeEventListener('keydown', onKey);
-      document.body.style.overflow = '';
-    };
-  }, [onClose, creatorOpen, stepCategory, query]);
-
   const q = query.trim().toLowerCase();
   const isSearching = q.length > 0;
 
@@ -740,8 +732,8 @@ function ExercisePicker({
   const showGroupsIndex = !isSearching && stepCategory === null;
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-bg/75 backdrop-blur-2xl backdrop-saturate-150">
-      <div className="mx-auto flex h-full w-full max-w-3xl flex-col px-4 pt-4 pb-2">
+    <BottomSheet open onClose={onClose} className="h-[88dvh] lg:h-[85vh] lg:max-w-lg">
+      <div className="mx-auto flex h-full w-full max-w-3xl flex-col px-4 pt-1 pb-2">
         {/* Top bar: back button (if inside group or searching) + search input + close */}
         <div className="flex items-center gap-2">
           {stepCategory !== null && (
@@ -880,7 +872,7 @@ function ExercisePicker({
           </div>
         )}
       </div>
-    </div>
+    </BottomSheet>
   );
 }
 

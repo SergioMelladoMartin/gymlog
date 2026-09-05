@@ -3,6 +3,7 @@ import { useDatabase } from '../hooks/useDatabase';
 import { getDb } from '../lib/sqlite';
 import { useT } from '../hooks/useT';
 import { getLocale } from '../lib/i18n';
+import { StatsSkeleton } from './ui/Skeleton';
 
 const StatsTrendChart = lazy(() => import('./StatsTrendChart'));
 
@@ -74,7 +75,7 @@ export default function StatsView() {
     const whereTs = pred ? `WHERE ${pred.replace(/DATECOL/g, 'ts.date')}` : '';
     setLabel(lbl);
 
-    const t = q(
+    const totalsRow = q(
       `SELECT COUNT(*) AS total_sets, COUNT(DISTINCT date) AS total_days,
               COUNT(DISTINCT exercise_id) AS total_exercises,
               SUM(metric_weight * reps) AS total_volume
@@ -82,10 +83,10 @@ export default function StatsView() {
       args,
     )[0];
     setTotals({
-      total_sets: Number(t?.total_sets ?? 0),
-      total_days: Number(t?.total_days ?? 0),
-      total_exercises: Number(t?.total_exercises ?? 0),
-      total_volume: Number(t?.total_volume ?? 0),
+      total_sets: Number(totalsRow?.total_sets ?? 0),
+      total_days: Number(totalsRow?.total_days ?? 0),
+      total_exercises: Number(totalsRow?.total_exercises ?? 0),
+      total_volume: Number(totalsRow?.total_volume ?? 0),
     });
 
     const pc = q(
@@ -159,7 +160,7 @@ export default function StatsView() {
     );
   }, [ready, groupBy, trendLimit]);
 
-  if (!ready) return <div className="flex min-h-[50vh] items-center justify-center text-muted"><div className="h-8 w-8 animate-spin rounded-full border-2 border-border border-t-accent" /></div>;
+  if (!ready) return <StatsSkeleton />;
 
   const maxVolume = perCat.reduce((a, c) => Math.max(a, c.volume), 0);
   const weekdayMax = Math.max(1, ...weekday);
@@ -202,7 +203,7 @@ export default function StatsView() {
                 key={g}
                 type="button"
                 onClick={() => setGroupBy(g)}
-                className={`rounded-full px-3 py-1 transition ${groupBy === g ? 'btn-accent' : 'text-muted hover:text-fg'}`}
+                className={`rounded-full px-3 py-1 transition active:scale-[0.97] ${groupBy === g ? 'btn-accent' : 'text-muted hover:text-fg'}`}
               >
                 {g === 'week' ? t('stats.week') : t('stats.month')}
               </button>
@@ -216,7 +217,7 @@ export default function StatsView() {
               key={m.id}
               type="button"
               onClick={() => setTrendMetric(m.id)}
-              className={`shrink-0 rounded-full px-3 py-1 text-[11px] font-medium transition ${trendMetric === m.id ? 'btn-accent' : 'bg-elevated/50 text-muted hover:bg-elevated hover:text-fg'}`}
+              className={`shrink-0 rounded-full px-3 py-1 text-[11px] font-medium transition active:scale-[0.97] ${trendMetric === m.id ? 'btn-accent' : 'bg-elevated/50 text-muted hover:bg-elevated hover:text-fg'}`}
             >
               {m.label}
             </button>
@@ -337,7 +338,7 @@ function Tile({ label, value, unit }: { label: string; value: string; unit?: str
   return (
     <div className="stat-tile">
       <div className="section-title">{label}</div>
-      <div className="mt-0.5 text-2xl font-semibold tabular-nums tracking-tight">
+      <div className="mt-0.5 font-display text-2xl font-semibold tabular-nums tracking-tight">
         {value}{unit && <span className="ml-1 text-sm font-medium text-muted">{unit}</span>}
       </div>
     </div>

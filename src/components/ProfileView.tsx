@@ -5,6 +5,7 @@ import { getWeeklyStreak } from '../lib/queries';
 import { useDatabase } from '../hooks/useDatabase';
 import { useT } from '../hooks/useT';
 import { getLocale } from '../lib/i18n';
+import { ProfileSkeleton } from './ui/Skeleton';
 
 interface Stats {
   totalSets: number;
@@ -48,13 +49,7 @@ export default function ProfileView() {
     setStreak(getWeeklyStreak());
   }, [ready]);
 
-  if (!ready) {
-    return (
-      <div className="flex min-h-[40vh] items-center justify-center text-muted">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-border border-t-accent" />
-      </div>
-    );
-  }
+  if (!ready) return <ProfileSkeleton />;
 
   const locale = getLocale(lang);
   const fmt = (n: number) => Math.round(n).toLocaleString(locale);
@@ -143,7 +138,7 @@ function Tile({ label, value, unit }: { label: string; value: string; unit?: str
   return (
     <div className="stat-tile">
       <div className="section-title">{label}</div>
-      <div className="mt-0.5 text-2xl font-semibold tabular-nums tracking-tight">
+      <div className="mt-0.5 font-display text-2xl font-semibold tabular-nums tracking-tight">
         {value}{unit && <span className="ml-1 text-sm font-medium text-muted">{unit}</span>}
       </div>
     </div>

@@ -258,6 +258,10 @@ const ES: Dict = {
   'login.appdataInfo':
     'Con Google: pedimos acceso solo a la carpeta oculta "appdata" de tu Drive. Tus entrenos se guardan en un archivo {file} compatible con la app FitNotes.',
   'login.usernameFallback': 'Usuario',
+  'login.howItWorks': '¿Cómo funciona?',
+  'login.uploadBackupLink': '¿Tienes un backup .fitnotes? Súbelo aquí',
+  'sheet.close': 'Cerrar',
+  'sheet.dragHandle': 'Arrastra o pulsa Escape para cerrar',
 
   // Settings — install instructions
   'settings.installIosStep1': 'Pulsa el botón de Compartir en Safari (el icono con la flecha hacia arriba)',
@@ -556,6 +560,10 @@ const EN: Dict = {
   'login.appdataInfo':
     'With Google: we only ask for access to the hidden "appdata" folder in your Drive. Your workouts are saved in a file {file} compatible with the FitNotes app.',
   'login.usernameFallback': 'User',
+  'login.howItWorks': 'How does this work?',
+  'login.uploadBackupLink': 'Have a .fitnotes backup? Upload it here',
+  'sheet.close': 'Close',
+  'sheet.dragHandle': 'Drag or press Escape to close',
 
   'settings.installIosStep1': 'Tap the Share button in Safari (the icon with an upward arrow)',
   'settings.installIosStep2': 'Scroll and choose Add to Home Screen',

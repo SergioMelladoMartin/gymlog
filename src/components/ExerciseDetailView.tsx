@@ -13,6 +13,7 @@ import type { Category } from '../lib/types';
 import ExerciseHeaderEditor from './ExerciseHeaderEditor';
 import { useT } from '../hooks/useT';
 import { getLocale } from '../lib/i18n';
+import { ExerciseDetailSkeleton } from './ui/Skeleton';
 
 // recharts is ~250 KB — by far the heaviest dependency in the app. Loading it
 // lazily lets the rest of this screen (header, stat tiles, full set history)
@@ -49,7 +50,7 @@ export default function ExerciseDetailView() {
     setCategories(getCategories());
   }, [ready, id]);
 
-  if (!ready) return <div className="flex min-h-[50vh] items-center justify-center text-muted"><div className="h-8 w-8 animate-spin rounded-full border-2 border-border border-t-accent" /></div>;
+  if (!ready) return <ExerciseDetailSkeleton />;
   if (notFound) { if (typeof window !== 'undefined') window.location.replace('/exercises'); return null; }
   if (!exercise) return null;
 

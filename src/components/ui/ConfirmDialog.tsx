@@ -31,6 +31,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useT } from '../../hooks/useT';
+import BottomSheet from './BottomSheet';
 
 export interface ConfirmOptions {
   title?: string;
@@ -131,24 +132,10 @@ export default function ConfirmDialogHost() {
   if (!pending) return null;
 
   return (
-    <div
-      className="fixed inset-0 z-[100] flex items-center justify-center p-4"
-      role="presentation"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) close(false);
-      }}
-    >
-      <div className="absolute inset-0 bg-black/50 animate-[fadeIn_150ms_ease]" aria-hidden="true" />
-      <div
-        ref={dialogRef}
-        role="alertdialog"
-        aria-modal="true"
-        aria-labelledby="confirm-dialog-title"
-        aria-describedby="confirm-dialog-body"
-        className="glass-float relative w-full max-w-sm rounded-[var(--radius-card)] p-5 motion-safe:animate-[sheetIn_180ms_cubic-bezier(0.2,0.8,0.2,1)]"
-      >
+    <BottomSheet open={!!pending} onClose={() => close(false)} title={pending.title}>
+      <div ref={dialogRef} role="alertdialog" aria-describedby="confirm-dialog-body" className="p-5 pt-2 lg:pt-1">
         {pending.title && (
-          <h2 id="confirm-dialog-title" className="mb-1.5 text-base font-semibold">
+          <h2 className="mb-1.5 text-base font-semibold lg:hidden">
             {pending.title}
           </h2>
         )}
@@ -177,6 +164,6 @@ export default function ConfirmDialogHost() {
           </button>
         </div>
       </div>
-    </div>
+    </BottomSheet>
   );
 }

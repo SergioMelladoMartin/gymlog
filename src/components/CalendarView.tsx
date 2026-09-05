@@ -3,6 +3,7 @@ import { useDatabase } from '../hooks/useDatabase';
 import { getDayPrCounts, getTrainingDaysInRange, todayISO } from '../lib/queries';
 import { useT } from '../hooks/useT';
 import { getLocale } from '../lib/i18n';
+import { CalendarSkeleton } from './ui/Skeleton';
 
 type View = 'month' | 'year';
 
@@ -37,7 +38,7 @@ export default function CalendarView() {
   const totalSets = days.reduce((a, d) => a + d.set_count, 0);
   const totalVolume = days.reduce((a, d) => a + d.total_volume, 0);
 
-  if (!ready) return <Loading />;
+  if (!ready) return <CalendarSkeleton />;
 
   // Month grid
   const first = new Date(year, month - 1, 1);
@@ -218,11 +219,8 @@ function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="stat-tile">
       <div className="section-title">{label}</div>
-      <div className="mt-0.5 text-2xl font-semibold tabular-nums tracking-tight">{value}</div>
+      <div className="mt-0.5 font-display text-2xl font-semibold tabular-nums tracking-tight">{value}</div>
     </div>
   );
 }
 
-function Loading() {
-  return <div className="flex min-h-[50vh] items-center justify-center text-muted"><div className="h-8 w-8 animate-spin rounded-full border-2 border-border border-t-accent" /></div>;
-}
