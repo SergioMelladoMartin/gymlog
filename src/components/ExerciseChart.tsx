@@ -9,6 +9,8 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
+import { useT } from '../hooks/useT';
+import { getLocale } from '../lib/i18n';
 
 export interface SessionPoint {
   date: string;
@@ -76,6 +78,8 @@ function rangeCutoff(rangeId: RangeId, lastDateISO: string): string | null {
 }
 
 export default function ExerciseChart({ data }: { data: SessionPoint[] }) {
+  const { lang } = useT();
+  const locale = getLocale(lang);
   const [metric, setMetric] = useState<Metric>('est_1rm');
   const [range, setRange] = useState<RangeId>('1Y');
   const [colors, setColors] = useState(readCssColors);
@@ -194,7 +198,7 @@ export default function ExerciseChart({ data }: { data: SessionPoint[] }) {
                 tick={{ fill: colors.muted, fontSize: 11 }}
                 tickFormatter={(v: string) => {
                   const d = new Date(v + 'T00:00:00');
-                  const m = d.toLocaleDateString('es-ES', { month: 'short' }).replace('.', '');
+                  const m = d.toLocaleDateString(locale, { month: 'short' }).replace('.', '');
                   return `${m} ${String(d.getFullYear()).slice(2)}`;
                 }}
                 minTickGap={40}
@@ -234,6 +238,7 @@ export default function ExerciseChart({ data }: { data: SessionPoint[] }) {
                     payload={props.payload}
                     metric={metric}
                     unit={active.unit}
+                    locale={locale}
                   />
                 )}
               />
@@ -264,16 +269,18 @@ function ChartTooltip({
   payload,
   metric,
   unit,
+  locale,
 }: {
   active?: boolean;
   payload?: Array<{ payload: any }>;
   metric: Metric;
   unit: string;
+  locale: string;
 }) {
   if (!active || !payload || !payload.length) return null;
   const p = payload[0].payload;
   const prettyDate = new Date(p.date + 'T00:00:00')
-    .toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' });
+    .toLocaleDateString(locale, { weekday: 'short', day: 'numeric', month: 'short' });
 
   let detail: string;
   if (metric === 'est_1rm') {

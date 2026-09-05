@@ -3,6 +3,8 @@ import { signOut } from '../lib/auth';
 import { exportBytes, importBytes, resetLocal, wipeAll } from '../lib/sqlite';
 import { useT } from '../hooks/useT';
 import { setLang, type Lang } from '../lib/i18n';
+import { useConfirm } from './ui/ConfirmDialog';
+import { toast } from './ui/Toast';
 
 const ACCENTS: Array<{ key: string; label: string; swatch: string }> = [
   { key: 'lime',   label: 'Lima',    swatch: '#a3e635' },
@@ -20,6 +22,7 @@ interface BeforeInstallPromptEvent extends Event {
 
 export default function SettingsView() {
   const { t, lang } = useT();
+  const confirm = useConfirm();
   const [theme, setTheme] = useState<'light' | 'dark'>('dark');
   const [accent, setAccent] = useState<string>('lime');
   const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null);
@@ -81,8 +84,8 @@ export default function SettingsView() {
       // Log the full error to the console so it's easy to ask the user to
       // read us back what happened (fits on a phone too).
       console.error('[import] failed', e);
-      const detail = e?.message ?? String(e) ?? 'Error al importar backup';
-      alert(detail);
+      const detail = e?.message ?? String(e) ?? t('settings.errorImportDefault');
+      toast.error(detail);
       setImporting(false);
     }
   }
@@ -104,7 +107,7 @@ export default function SettingsView() {
         URL.revokeObjectURL(url);
       }, 0);
     } catch (e: any) {
-      alert(e?.message ?? 'Error al exportar');
+      toast.error(e?.message ?? t('settings.errorExportDefault'));
     } finally {
       setExporting(false);
     }
@@ -117,7 +120,13 @@ export default function SettingsView() {
   }
 
   async function wipeDrive() {
-    if (!window.confirm(t('settings.wipeDriveConfirm'))) return;
+    const ok = await confirm({
+      title: t('settings.wipeDrive'),
+      body: t('settings.wipeDriveConfirm'),
+      confirmLabel: t('action.delete'),
+      destructive: true,
+    });
+    if (!ok) return;
     setWiping(true);
     try {
       await wipeAll();
@@ -125,7 +134,7 @@ export default function SettingsView() {
       // so the flow feels clean.
       window.location.replace('/');
     } catch (e: any) {
-      alert(e?.message ?? 'Error');
+      toast.error(e?.message ?? t('settings.errorWipeDefault'));
       setWiping(false);
     }
   }
@@ -234,19 +243,19 @@ export default function SettingsView() {
             </>
           ) : ua.ios ? (
             <ol className="flex flex-col gap-2 text-sm text-muted">
-              <li>1. Pulsa el botón de <b>Compartir</b> en Safari (el icono con la flecha hacia arriba)</li>
-              <li>2. Desliza y elige <b>Añadir a pantalla de inicio</b></li>
-              <li>3. Pulsa <b>Añadir</b> arriba a la derecha</li>
+              <li>1. {t('settings.installIosStep1')}</li>
+              <li>2. {t('settings.installIosStep2')}</li>
+              <li>3. {t('settings.installIosStep3')}</li>
             </ol>
           ) : ua.android ? (
             <ol className="flex flex-col gap-2 text-sm text-muted">
-              <li>1. Abre el menú ⋮ en Chrome</li>
-              <li>2. Pulsa <b>Instalar aplicación</b> o <b>Añadir a pantalla principal</b></li>
+              <li>1. {t('settings.installAndroidStep1')}</li>
+              <li>2. {t('settings.installAndroidStep2')}</li>
             </ol>
           ) : (
             <ol className="flex flex-col gap-2 text-sm text-muted">
-              <li>1. Busca el icono de <b>Instalar</b> a la derecha de la barra de direcciones (parece una pantalla con flecha)</li>
-              <li>2. Haz click → <b>Instalar</b></li>
+              <li>1. {t('settings.installDesktopStep1')}</li>
+              <li>2. {t('settings.installDesktopStep2')}</li>
             </ol>
           )}
         </section>

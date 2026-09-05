@@ -1,6 +1,9 @@
 import { useState } from 'react';
 import type { Category } from '../lib/types';
 import { countExerciseSets, deleteExercise, updateExercise } from '../lib/queries';
+import { useT } from '../hooks/useT';
+import { useConfirm } from './ui/ConfirmDialog';
+import { toast } from './ui/Toast';
 
 interface Props {
   exerciseId: number;
@@ -19,25 +22,35 @@ export default function ExerciseHeaderEditor({
   categoryColor,
   categories,
 }: Props) {
+  const { t } = useT();
+  const confirm = useConfirm();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(initialName);
   const [catId, setCatId] = useState(initialCategoryId);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  function handleDelete() {
+  async function handleDelete() {
     const setCount = countExerciseSets(exerciseId);
-    const msg =
-      setCount > 0
-        ? `Borrar "${initialName}" también eliminará ${setCount} ${setCount === 1 ? 'serie registrada' : 'series registradas'}. Esta acción no se puede deshacer. ¿Continuar?`
-        : `Borrar "${initialName}"? Esta acción no se puede deshacer.`;
-    if (!window.confirm(msg)) return;
+    const ok = await confirm({
+      title: t('exercise.confirmDeleteTitle'),
+      body: setCount > 0
+        ? t('exercise.confirmDeleteWithSets', {
+            name: initialName,
+            count: setCount,
+            unit: setCount === 1 ? t('exercise.setRegistered') : t('exercise.setsRegistered'),
+          })
+        : t('exercise.confirmDeletePlain', { name: initialName }),
+      confirmLabel: t('action.delete'),
+      destructive: true,
+    });
+    if (!ok) return;
     setDeleting(true);
     try {
       deleteExercise(exerciseId);
       window.location.assign('/exercises');
     } catch (err: any) {
-      alert(err?.message ?? 'Error al borrar');
+      toast.error(err?.message ?? t('exercise.errorDelete'));
       setDeleting(false);
     }
   }
@@ -50,7 +63,7 @@ export default function ExerciseHeaderEditor({
       updateExercise(exerciseId, { name: name.trim(), category_id: catId });
       window.location.reload();
     } catch (err: any) {
-      alert(err?.message ?? 'Error al guardar');
+      toast.error(err?.message ?? t('exercise.errorSave'));
     } finally {
       setSaving(false);
     }
@@ -67,8 +80,8 @@ export default function ExerciseHeaderEditor({
             type="button"
             onClick={() => setEditing(true)}
             className="ml-1 grid h-7 w-7 place-items-center rounded-md border border-border bg-elevated/60 text-muted transition hover:bg-elevated hover:text-fg"
-            aria-label="Editar ejercicio"
-            title="Editar nombre y categoría"
+            aria-label={t('action.edit')}
+            title={t('action.edit')}
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
@@ -84,9 +97,9 @@ export default function ExerciseHeaderEditor({
   return (
     <form onSubmit={save} className="rounded-xl border border-accent/40 bg-card p-3">
       <div className="mb-2 flex items-center justify-between">
-        <div className="section-title">Editar ejercicio</div>
+        <div className="section-title">{t('action.edit')}</div>
         <button type="button" onClick={() => { setName(initialName); setCatId(initialCategoryId); setEditing(false); }} className="text-xs text-muted hover:text-fg">
-          Cancelar
+          {t('action.cancel')}
         </button>
       </div>
       <input
@@ -120,7 +133,7 @@ export default function ExerciseHeaderEditor({
         disabled={!name.trim() || saving || deleting}
         className="btn-accent mt-3 w-full rounded-lg py-2 text-sm disabled:opacity-40"
       >
-        {saving ? 'Guardando…' : 'Guardar'}
+        {saving ? t('action.saving') : t('action.save')}
       </button>
       <button
         type="button"
@@ -135,7 +148,7 @@ export default function ExerciseHeaderEditor({
           <path d="M10 11v6" />
           <path d="M14 11v6" />
         </svg>
-        {deleting ? 'Borrando…' : 'Borrar ejercicio'}
+        {deleting ? t('action.deleting') : t('exercise.confirmDeleteTitle')}
       </button>
     </form>
   );

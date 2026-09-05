@@ -8,6 +8,8 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
+import { useT } from '../hooks/useT';
+import { getLocale } from '../lib/i18n';
 
 export interface TrendPoint {
   label: string;
@@ -38,12 +40,14 @@ export default function StatsTrendChart({
   data: TrendPoint[];
   unit?: string;
 }) {
+  const { t, lang } = useT();
+  const locale = getLocale(lang);
   const colors = useMemo(readCssColors, []);
 
   if (!data.length) {
     return (
       <div className="flex h-56 items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted">
-        Sin datos en este periodo.
+        {t('stats.noDataPeriod')}
       </div>
     );
   }
@@ -85,7 +89,7 @@ export default function StatsTrendChart({
                   <div className="font-medium text-fg">{p.label}</div>
                   <div className="mt-0.5 tabular-nums">
                     <span className="text-base font-semibold tracking-tight">
-                      {Math.round(p.value).toLocaleString('es-ES')}
+                      {Math.round(p.value).toLocaleString(locale)}
                     </span>
                     {unit && <span className="ml-0.5 text-[10px] text-muted">{unit}</span>}
                   </div>

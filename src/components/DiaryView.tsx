@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { useDatabase } from '../hooks/useDatabase';
 import { getDayPrCounts } from '../lib/queries';
 import { getDb } from '../lib/sqlite';
+import { useT } from '../hooks/useT';
+import { getLocale } from '../lib/i18n';
 
 interface DayRow {
   date: string;
@@ -25,17 +27,19 @@ function argbToHex(n: number | null): string | null {
   return '#' + [(u >> 16) & 0xff, (u >> 8) & 0xff, u & 0xff].map((v) => v.toString(16).padStart(2, '0')).join('');
 }
 
-function formatDate(iso: string) {
+function formatDate(iso: string, locale: string) {
   const d = new Date(iso + 'T00:00:00');
   return {
-    weekday: d.toLocaleDateString('es-ES', { weekday: 'short' }).replace('.', ''),
+    weekday: d.toLocaleDateString(locale, { weekday: 'short' }).replace('.', ''),
     day: d.getDate(),
-    month: d.toLocaleDateString('es-ES', { month: 'short' }).replace('.', ''),
+    month: d.toLocaleDateString(locale, { month: 'short' }).replace('.', ''),
     year: d.getFullYear(),
   };
 }
 
 export default function DiaryView() {
+  const { t, lang } = useT();
+  const locale = getLocale(lang);
   const ready = useDatabase();
   const [days, setDays] = useState<DayRow[]>([]);
   const [breakdown, setBreakdown] = useState<Map<string, BreakdownRow[]>>(new Map());
@@ -140,25 +144,25 @@ export default function DiaryView() {
     <>
       <div className="mb-4 flex items-end justify-between gap-3">
         <div>
-          <div className="text-xs font-medium uppercase tracking-wider text-muted">Histórico</div>
-          <h1 className="text-3xl font-semibold tracking-tight">Diario</h1>
+          <div className="text-xs font-medium uppercase tracking-wider text-muted">{t('diary.historic')}</div>
+          <h1 className="text-3xl font-semibold tracking-tight">{t('nav.diary')}</h1>
         </div>
         {paged && (
           <a href="/diary" className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border bg-elevated/60 px-3 py-1.5 text-xs font-medium text-muted transition hover:bg-elevated hover:text-fg">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m11 17-5-5 5-5" /><path d="m18 17-5-5 5-5" /></svg>
-            Inicio
+            {t('diary.home')}
           </a>
         )}
       </div>
 
       {days.length === 0 ? (
-        <p className="text-muted">No hay entrenos registrados todavía.</p>
+        <p className="text-muted">{t('diary.noWorkouts')}</p>
       ) : (
         <div className="flex flex-col gap-3">
           {days.map((d) => {
             const exs = breakdown.get(d.date) ?? [];
             const note = comments.get(d.date);
-            const f = formatDate(d.date);
+            const f = formatDate(d.date, locale);
             const pr = prs.get(d.date);
             const prTotal = (pr?.pr_weight ?? 0) + (pr?.pr_reps ?? 0);
             return (
@@ -182,7 +186,7 @@ export default function DiaryView() {
                       )}
                     </div>
                     <div className="text-xs tabular-nums text-muted">
-                      {d.exercise_count} ej · {d.set_count} sets · {Math.round(d.volume).toLocaleString('es-ES')} kg
+                      {t('diary.summary', { ex: d.exercise_count, sets: d.set_count, vol: Math.round(d.volume).toLocaleString(locale) })}
                     </div>
                   </div>
                   <ul className="mt-2 flex flex-col gap-1 text-sm">
@@ -192,7 +196,7 @@ export default function DiaryView() {
                           <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: e.category_color ?? '#888' }} />
                           <span className="truncate">{e.exercise_name}</span>
                         </span>
-                        <span className="shrink-0 tabular-nums text-muted">{e.sets}× · top {e.top_weight}×{e.top_reps}</span>
+                        <span className="shrink-0 tabular-nums text-muted">{e.sets}× · {t('diary.top')} {e.top_weight}×{e.top_reps}</span>
                       </li>
                     ))}
                   </ul>
@@ -208,17 +212,17 @@ export default function DiaryView() {
         {hasNewer && newestDate ? (
           <a href={`/diary?after=${newestDate}`} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-elevated/60 px-4 py-2 text-sm text-muted transition hover:bg-elevated hover:text-fg">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
-            Más recientes
+            {t('diary.newer')}
           </a>
         ) : paged ? (
           <a href="/diary" className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-elevated/60 px-4 py-2 text-sm text-muted transition hover:bg-elevated hover:text-fg">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
-            Volver al inicio
+            {t('diary.backHome')}
           </a>
         ) : <span />}
         {hasOlder && oldestDate && (
           <a href={`/diary?before=${oldestDate}`} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-elevated/60 px-4 py-2 text-sm text-muted transition hover:bg-elevated hover:text-fg">
-            Más antiguos
+            {t('diary.older')}
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
           </a>
         )}

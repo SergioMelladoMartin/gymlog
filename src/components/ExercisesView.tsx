@@ -4,8 +4,11 @@ import { useDatabase } from '../hooks/useDatabase';
 import { createExercise as qCreateExercise, getCategories, getExercises, type ExerciseExtra } from '../lib/queries';
 import type { Category } from '../lib/types';
 import ExerciseList from './ExerciseList';
+import { useT } from '../hooks/useT';
+import { toast } from './ui/Toast';
 
 export default function ExercisesView() {
+  const { t } = useT();
   const ready = useDatabase();
   const [exercises, setExercises] = useState<ExerciseExtra[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -41,10 +44,10 @@ export default function ExercisesView() {
         {activeCategory ? (
           <a href="/exercises" className="inline-flex items-center gap-1 text-sm text-muted transition hover:text-fg">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
-            Grupos
+            {t('exercises.groups')}
           </a>
         ) : (
-          <div className="text-xs font-medium uppercase tracking-wider text-muted">Catálogo</div>
+          <div className="text-xs font-medium uppercase tracking-wider text-muted">{t('exercises.catalog')}</div>
         )}
         <div className="flex items-center justify-between gap-3">
           <h1 className="text-3xl font-semibold tracking-tight">
@@ -53,7 +56,7 @@ export default function ExercisesView() {
                 <span className="h-2.5 w-2.5 rounded-full" style={{ background: activeCategory.color ?? '#888' }} />
                 {activeCategory.name}
               </span>
-            ) : 'Ejercicios'}
+            ) : t('nav.exercises')}
           </h1>
           <button
             type="button"
@@ -61,14 +64,14 @@ export default function ExercisesView() {
             className="btn-accent inline-flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-2 text-xs"
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M12 5v14" /><path d="M5 12h14" /></svg>
-            Crear ejercicio
+            {t('exercise.createBtn')}
           </button>
         </div>
       </div>
 
       {showGroupsIndex ? (
         <>
-          <div className="mb-3 text-xs text-muted">Elige un grupo muscular para ver sus ejercicios</div>
+          <div className="mb-3 text-xs text-muted">{t('exercises.chooseGroup')}</div>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             {categories.map((c) => {
               const n = countByCat.get(c.id) ?? 0;
@@ -79,7 +82,7 @@ export default function ExercisesView() {
                       <span className="h-2.5 w-2.5 rounded-full" style={{ background: c.color ?? '#888', boxShadow: `0 0 10px ${c.color ?? '#888'}55` }} />
                       <span className="truncate font-semibold">{c.name}</span>
                     </span>
-                    <span className="mt-1 text-xs text-muted">{n} ejercicio{n === 1 ? '' : 's'}</span>
+                    <span className="mt-1 text-xs text-muted">{n === 1 ? t('exercises.countSingular', { n }) : t('exercises.countPlural', { n })}</span>
                   </div>
                   <svg className="shrink-0 text-muted transition group-hover:text-fg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
                 </a>
@@ -88,7 +91,7 @@ export default function ExercisesView() {
           </div>
           <div className="mt-6">
             <a href="/exercises?q=_all" className="block rounded-xl border border-dashed border-border bg-card/50 p-3 text-center text-sm text-muted transition hover:bg-card hover:text-fg">
-              Ver todos los ejercicios ({exercises.length})
+              {t('exercises.viewAll', { n: exercises.length })}
             </a>
           </div>
         </>
@@ -129,6 +132,7 @@ function CreateExerciseModal({
   onClose: () => void;
   onCreated: (id: number) => void;
 }) {
+  const { t } = useT();
   const [name, setName] = useState('');
   const [categoryId, setCategoryId] = useState<number | null>(defaultCategoryId);
   const [submitting, setSubmitting] = useState(false);
@@ -154,7 +158,7 @@ function CreateExerciseModal({
       const id = qCreateExercise(trimmed, categoryId);
       onCreated(id);
     } catch (err: any) {
-      alert(err?.message ?? 'Error al crear ejercicio');
+      toast.error(err?.message ?? t('exercise.errorCreate'));
       setSubmitting(false);
     }
   }
@@ -175,8 +179,8 @@ function CreateExerciseModal({
         className="glass-float w-full max-w-md rounded-2xl p-5"
       >
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-lg font-semibold tracking-tight">Crear ejercicio</h2>
-          <button type="button" onClick={onClose} aria-label="Cerrar" className="grid h-7 w-7 place-items-center rounded-md text-muted transition hover:bg-elevated hover:text-fg">
+          <h2 className="text-lg font-semibold tracking-tight">{t('exercise.createBtn')}</h2>
+          <button type="button" onClick={onClose} aria-label={t('action.close')} className="grid h-7 w-7 place-items-center rounded-md text-muted transition hover:bg-elevated hover:text-fg">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
           </button>
         </div>
@@ -184,10 +188,10 @@ function CreateExerciseModal({
           autoFocus
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="Ej: Press inclinado (mancuernas)"
+          placeholder={t('exercise.namePlaceholder')}
           className="w-full rounded-lg border border-border bg-elevated px-3 py-2.5 text-base outline-none transition focus:border-accent/60"
         />
-        <div className="mt-3 text-[11px] font-medium uppercase tracking-wider text-muted">Grupo muscular</div>
+        <div className="mt-3 text-[11px] font-medium uppercase tracking-wider text-muted">{t('exercise.muscleGroup')}</div>
         <div className="no-scrollbar -mx-1 mt-1.5 flex flex-wrap gap-1.5 px-1">
           {categories.map((c) => {
             const active = categoryId === c.id;
@@ -214,14 +218,14 @@ function CreateExerciseModal({
             onClick={onClose}
             className="flex-1 rounded-lg border border-border bg-elevated/60 py-2.5 text-sm font-medium text-muted transition hover:bg-elevated hover:text-fg"
           >
-            Cancelar
+            {t('action.cancel')}
           </button>
           <button
             type="submit"
             disabled={!name.trim() || !categoryId || submitting}
             className="btn-accent flex-[2] rounded-lg py-2.5 text-sm disabled:opacity-40"
           >
-            {submitting ? 'Creando…' : 'Crear y abrir'}
+            {submitting ? t('exercise.creating') : t('exercise.createAndOpen')}
           </button>
         </div>
       </form>

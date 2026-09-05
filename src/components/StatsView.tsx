@@ -1,6 +1,8 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { useDatabase } from '../hooks/useDatabase';
 import { getDb } from '../lib/sqlite';
+import { useT } from '../hooks/useT';
+import { getLocale } from '../lib/i18n';
 
 const StatsTrendChart = lazy(() => import('./StatsTrendChart'));
 
@@ -10,13 +12,6 @@ type TrendMetric = 'workouts' | 'volume' | 'sets' | 'reps';
 
 interface TrendRow { period: string; days: number; sets: number; reps: number; volume: number }
 
-const TREND_METRICS: Array<{ id: TrendMetric; label: string; field: keyof Omit<TrendRow, 'period'>; unit?: string }> = [
-  { id: 'workouts', label: 'Entrenos', field: 'days' },
-  { id: 'volume',   label: 'Volumen',  field: 'volume', unit: 'kg' },
-  { id: 'sets',     label: 'Series',   field: 'sets' },
-  { id: 'reps',     label: 'Reps',     field: 'reps' },
-];
-
 function argbToHex(n: number | null): string | null {
   if (n == null) return null;
   const u = n >>> 0;
@@ -24,6 +19,16 @@ function argbToHex(n: number | null): string | null {
 }
 
 export default function StatsView() {
+  const { t, lang } = useT();
+  const locale = getLocale(lang);
+
+  const TREND_METRICS: Array<{ id: TrendMetric; label: string; field: keyof Omit<TrendRow, 'period'>; unit?: string }> = [
+    { id: 'workouts', label: t('stats.metric.workouts'), field: 'days' },
+    { id: 'volume',   label: t('stats.metric.volume'),  field: 'volume', unit: 'kg' },
+    { id: 'sets',     label: t('stats.metric.sets'),   field: 'sets' },
+    { id: 'reps',     label: t('stats.metric.reps'),     field: 'reps' },
+  ];
+
   const ready = useDatabase();
   const url = typeof window !== 'undefined' ? new URL(window.location.href) : null;
   const range = (url?.searchParams.get('range') ?? 'all') as Range;
@@ -33,7 +38,7 @@ export default function StatsView() {
   const [perCat, setPerCat] = useState<Array<{ id: number; name: string; color: string | null; set_count: number; volume: number }>>([]);
   const [top, setTop] = useState<Array<{ id: number; name: string; color: string | null; set_count: number }>>([]);
   const [weekday, setWeekday] = useState<number[]>([0, 0, 0, 0, 0, 0, 0]);
-  const [label, setLabel] = useState('Todo el histórico');
+  const [label, setLabel] = useState(t('stats.range.all'));
 
   // Trend card has its own controls (independent of the range chips): it
   // always shows the most recent 12 weeks or months.
@@ -53,16 +58,16 @@ export default function StatsView() {
     // training_log so the `date(...)` function call never gets prefixed with
     // a table alias (that was producing invalid SQL like `ts.date('now', …)`
     // and blanking the page on every range except "Todo").
-    let pred = ''; let args: any[] = []; let lbl = 'Todo el histórico';
+    let pred = ''; let args: any[] = []; let lbl = t('stats.range.all');
     switch (range) {
-      case '7d':   pred = "DATECOL >= date('now', '-7 days')";   lbl = 'Últimos 7 días'; break;
-      case '30d':  pred = "DATECOL >= date('now', '-30 days')";  lbl = 'Últimos 30 días'; break;
-      case '90d':  pred = "DATECOL >= date('now', '-90 days')";  lbl = 'Últimos 90 días'; break;
-      case '365d': pred = "DATECOL >= date('now', '-365 days')"; lbl = 'Últimos 12 meses'; break;
+      case '7d':   pred = "DATECOL >= date('now', '-7 days')";   lbl = t('stats.range.7d'); break;
+      case '30d':  pred = "DATECOL >= date('now', '-30 days')";  lbl = t('stats.range.30d'); break;
+      case '90d':  pred = "DATECOL >= date('now', '-90 days')";  lbl = t('stats.range.90d'); break;
+      case '365d': pred = "DATECOL >= date('now', '-365 days')"; lbl = t('stats.range.365d'); break;
       case 'year':
         pred = 'DATECOL >= ? AND DATECOL <= ?';
         args = [`${year}-01-01`, `${year}-12-31`];
-        lbl = year === new Date().getFullYear() ? 'Año en curso' : `Año ${year}`;
+        lbl = year === new Date().getFullYear() ? t('stats.range.yearCurrent') : t('stats.range.year', { year });
         break;
     }
     const where = pred ? `WHERE ${pred.replace(/DATECOL/g, 'date')}` : '';
@@ -158,30 +163,30 @@ export default function StatsView() {
 
   const maxVolume = perCat.reduce((a, c) => Math.max(a, c.volume), 0);
   const weekdayMax = Math.max(1, ...weekday);
-  const fmt = (n: number) => Math.round(n).toLocaleString('es-ES');
+  const fmt = (n: number) => Math.round(n).toLocaleString(locale);
   const currentYear = new Date().getFullYear();
   const chips: Array<{ id: Range; label: string; href: string; match: boolean }> = [
     { id: '7d', label: '7d', href: '/stats?range=7d', match: range === '7d' },
     { id: '30d', label: '30d', href: '/stats?range=30d', match: range === '30d' },
     { id: '90d', label: '90d', href: '/stats?range=90d', match: range === '90d' },
-    { id: '365d', label: '1a', href: '/stats?range=365d', match: range === '365d' },
+    { id: '365d', label: t('stats.chip.year'), href: '/stats?range=365d', match: range === '365d' },
     { id: 'year', label: 'YTD', href: `/stats?range=year&year=${currentYear}`, match: range === 'year' && year === currentYear },
-    { id: 'all', label: 'Todo', href: '/stats', match: range === 'all' },
+    { id: 'all', label: t('stats.chip.all'), href: '/stats', match: range === 'all' },
   ];
 
   const activeTrend = TREND_METRICS.find((m) => m.id === trendMetric)!;
   const trendData = trend.map((r) => ({
     label: groupBy === 'week'
-      ? new Date(r.period + 'T00:00:00').toLocaleDateString('es-ES', { day: 'numeric', month: 'short' }).replace('.', '')
-      : new Date(r.period + '-01T00:00:00').toLocaleDateString('es-ES', { month: 'short', year: '2-digit' }).replace('.', ''),
+      ? new Date(r.period + 'T00:00:00').toLocaleDateString(locale, { day: 'numeric', month: 'short' }).replace('.', '')
+      : new Date(r.period + '-01T00:00:00').toLocaleDateString(locale, { month: 'short', year: '2-digit' }).replace('.', ''),
     value: Number(r[activeTrend.field]),
   }));
 
   return (
     <>
       <div className="mb-5">
-        <div className="text-xs font-medium uppercase tracking-wider text-muted">Tu progreso</div>
-        <h1 className="text-3xl font-semibold tracking-tight">Estadísticas</h1>
+        <div className="text-xs font-medium uppercase tracking-wider text-muted">{t('stats.yourProgress')}</div>
+        <h1 className="text-3xl font-semibold tracking-tight">{t('nav.stats')}</h1>
       </div>
 
       {/* ── Zone 1 · Evolución (its own week/month window, independent of the
@@ -189,7 +194,7 @@ export default function StatsView() {
       <div className="card mb-6 p-4">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div className="section-title">
-            Evolución · {groupBy === 'week' ? `${trendLimit} semanas` : `${trendLimit} meses`}
+            {t('stats.evolution')} · {groupBy === 'week' ? t('stats.weeks', { n: trendLimit }) : t('stats.months', { n: trendLimit })}
           </div>
           <div className="flex gap-1 rounded-full border border-border bg-card p-0.5 text-[11px] font-medium">
             {(['week', 'month'] as const).map((g) => (
@@ -199,7 +204,7 @@ export default function StatsView() {
                 onClick={() => setGroupBy(g)}
                 className={`rounded-full px-3 py-1 transition ${groupBy === g ? 'btn-accent' : 'text-muted hover:text-fg'}`}
               >
-                {g === 'week' ? 'Semana' : 'Mes'}
+                {g === 'week' ? t('stats.week') : t('stats.month')}
               </button>
             ))}
           </div>
@@ -226,7 +231,7 @@ export default function StatsView() {
       {/* ── Zone 2 · Resumen del periodo — everything below is scoped to the
           selected range chip ────────────────────────────────────────────── */}
       <div className="mb-2 flex items-baseline justify-between gap-2">
-        <div className="section-title">Resumen del periodo</div>
+        <div className="section-title">{t('stats.summary')}</div>
         <div className="text-xs capitalize text-muted">{label}</div>
       </div>
 
@@ -237,16 +242,19 @@ export default function StatsView() {
       </div>
 
       <div className="mb-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <Tile label="Días" value={String(totals.total_days)} />
-        <Tile label="Sets" value={fmt(totals.total_sets)} />
-        <Tile label="Ejercicios" value={String(totals.total_exercises)} />
-        <Tile label="Volumen" value={`${Math.round(totals.total_volume / 1000)}k`} unit="kg" />
+        <Tile label={t('calendar.days')} value={String(totals.total_days)} />
+        <Tile label={t('workout.sets')} value={fmt(totals.total_sets)} />
+        <Tile label={t('nav.exercises')} value={String(totals.total_exercises)} />
+        <Tile label={t('stats.metric.volume')} value={`${Math.round(totals.total_volume / 1000)}k`} unit="kg" />
       </div>
 
       <div className="card mb-5 p-4">
-        <div className="section-title mb-3">Distribución semanal</div>
+        <div className="section-title mb-3">{t('stats.weeklyDistribution')}</div>
         <ul className="flex flex-col gap-2 sm:hidden">
-          {['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'].map((l, i) => {
+          {[
+            t('weekday.full.mon'), t('weekday.full.tue'), t('weekday.full.wed'),
+            t('weekday.full.thu'), t('weekday.full.fri'), t('weekday.full.sat'), t('weekday.full.sun'),
+          ].map((l, i) => {
             const v = weekday[i];
             const pct = weekdayMax ? (v / weekdayMax) * 100 : 0;
             return (
@@ -261,7 +269,10 @@ export default function StatsView() {
           })}
         </ul>
         <div className="hidden items-end gap-2 sm:flex">
-          {['L', 'M', 'X', 'J', 'V', 'S', 'D'].map((l, i) => {
+          {[
+            t('weekday.letter.mon'), t('weekday.letter.tue'), t('weekday.letter.wed'),
+            t('weekday.letter.thu'), t('weekday.letter.fri'), t('weekday.letter.sat'), t('weekday.letter.sun'),
+          ].map((l, i) => {
             const v = weekday[i];
             const h = Math.max(4, (v / weekdayMax) * 72);
             return (
@@ -278,8 +289,8 @@ export default function StatsView() {
       </div>
 
       <div className="card mb-5 p-4">
-        <div className="section-title mb-3">Volumen por categoría</div>
-        {perCat.length === 0 ? <div className="py-6 text-center text-sm text-muted">Sin datos.</div> : (
+        <div className="section-title mb-3">{t('stats.volumeByCategory')}</div>
+        {perCat.length === 0 ? <div className="py-6 text-center text-sm text-muted">{t('stats.noData')}</div> : (
           <ul className="flex flex-col gap-3">
             {perCat.map((c) => (
               <li key={c.id}>
@@ -300,8 +311,8 @@ export default function StatsView() {
       </div>
 
       <div className="card p-4">
-        <div className="section-title mb-2">Top 10 ejercicios</div>
-        {top.length === 0 ? <div className="py-6 text-center text-sm text-muted">Sin datos.</div> : (
+        <div className="section-title mb-2">{t('stats.top10')}</div>
+        {top.length === 0 ? <div className="py-6 text-center text-sm text-muted">{t('stats.noData')}</div> : (
           <ul className="divide-y divide-border">
             {top.map((e, i) => (
               <li key={e.id}>

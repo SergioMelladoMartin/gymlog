@@ -12,7 +12,7 @@
 // this SW has cached the shell, the whole thing works offline except the
 // Drive sync which is gated on network anyway.
 
-const CACHE_VERSION = 'gymlog-v3';
+const CACHE_VERSION = 'gymlog-v4';
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const ASSET_CACHE = `${CACHE_VERSION}-assets`;
 
@@ -29,6 +29,11 @@ const SHELL_URLS = [
   '/profile',
   '/manifest.webmanifest',
   '/favicon.svg',
+  '/fonts/InterVariable.woff2',
+  '/icon-192.png',
+  '/icon-512.png',
+  '/icon-512-maskable.png',
+  '/apple-touch-icon.png',
 ];
 
 self.addEventListener('install', (event) => {

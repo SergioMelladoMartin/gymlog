@@ -13,6 +13,9 @@ import {
   updateSet as qUpdateSet,
 } from '../lib/queries';
 import { useT } from '../hooks/useT';
+import { getLocale } from '../lib/i18n';
+import { useConfirm } from './ui/ConfirmDialog';
+import { toast } from './ui/Toast';
 
 function vibrate(pattern: number | number[]) {
   try { if ('vibrate' in navigator) navigator.vibrate(pattern); } catch {}
@@ -44,6 +47,7 @@ interface DraftSet {
 
 export default function WorkoutLogger({ date, exercises: initialExercises, categories, initialSets, initialComment, onSetsChange }: Props) {
   const { t, lang } = useT();
+  const confirm = useConfirm();
   const [exercises, setExercises] = useState<Exercise[]>(initialExercises);
   const [sets, setSets] = useState<TrainingSet[]>(initialSets);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -199,7 +203,7 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
       setExercises((prev) => [...prev, ex]);
       return ex;
     } catch (e: any) {
-      alert(e?.message ?? 'Error al crear ejercicio');
+      toast.error(e?.message ?? t('exercise.errorCreate'));
       return null;
     }
   }
@@ -234,7 +238,7 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
     }
   }
 
-  const locale = lang === 'en' ? 'en-US' : 'es-ES';
+  const locale = getLocale(lang);
   const restSecs = lastSetAt ? Math.floor((Date.now() - lastSetAt) / 1000) : 0;
 
   // PR summary for today
@@ -333,7 +337,7 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
                       ? t('workout.noSetsYet')
                       : `${exSets.length} ${exSets.length === 1 ? t('workout.serie') : t('workout.series')}${cardio
                           ? `${totalDuration ? ` · ${formatDuration(totalDuration)}` : ''}${totalDistance > 0 ? ` · ${formatDistance(totalDistance)}` : ''}`
-                          : ` · ${Math.round(totalVol).toLocaleString('es-ES')} kg`}`}
+                          : ` · ${Math.round(totalVol).toLocaleString(locale)} kg`}`}
                   </span>
                 </header>
 
@@ -344,7 +348,7 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
                       <span>
                         {cardio
                           ? `${formatDuration(totalDuration)}${totalDistance > 0 ? ` · ${formatDistance(totalDistance)}` : ''}`
-                          : `${Math.round(totalVol).toLocaleString('es-ES')} kg`}
+                          : `${Math.round(totalVol).toLocaleString(locale)} kg`}
                       </span>
                     </div>
 
@@ -362,8 +366,9 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
                             await updateSet(s.id, patch);
                             setEditingSetId(null);
                           }}
-                          onDelete={() => {
-                            if (window.confirm(t('workout.confirmDeleteSet'))) deleteSet(s.id);
+                          onDelete={async () => {
+                            const ok = await confirm({ body: t('workout.confirmDeleteSet'), confirmLabel: t('action.delete'), destructive: true });
+                            if (ok) deleteSet(s.id);
                           }}
                           onDuplicate={() => duplicateSet(s.id)}
                         />
@@ -535,7 +540,7 @@ function QuickAdd({
         onMouseDown={(e) => e.preventDefault()}
         className="btn-accent grid h-[52px] w-[52px] shrink-0 place-items-center rounded-xl active:scale-95 disabled:opacity-40"
         disabled={!draft.weight || !draft.reps}
-        aria-label={justAdded ? 'Añadido' : 'Añadir set'}
+        aria-label={justAdded ? tLocal('workout.added') : tLocal('workout.addSetAria')}
       >
         {justAdded ? (
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
@@ -625,6 +630,7 @@ function ExercisePicker({
   onClose: () => void;
   onCreate: (name: string, categoryId: number) => Promise<Exercise | null>;
 }) {
+  const { t } = useT();
   const [query, setQuery] = useState('');
   const [stepCategory, setStepCategory] = useState<number | null>(null); // null = group index
   const [creatorOpen, setCreatorOpen] = useState(false);
@@ -694,7 +700,7 @@ function ExercisePicker({
               type="button"
               onClick={() => { setStepCategory(null); setQuery(''); }}
               className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-border bg-elevated/60 text-muted transition hover:bg-elevated hover:text-fg"
-              aria-label="Volver a grupos"
+              aria-label={t('picker.backToGroups')}
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
             </button>
@@ -703,7 +709,7 @@ function ExercisePicker({
             <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>
             <input
               autoFocus
-              placeholder={activeCategory ? `Buscar en ${activeCategory.name}…` : 'Buscar ejercicio…'}
+              placeholder={activeCategory ? t('picker.searchInGroup', { group: activeCategory.name }) : t('exercises.searchPlaceholder')}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               className="w-full rounded-xl border border-border bg-elevated pl-9 pr-3 py-2.5 outline-none transition focus:border-accent/60"
@@ -714,7 +720,7 @@ function ExercisePicker({
             onClick={onClose}
             className="rounded-lg px-3 py-2 text-sm text-muted transition hover:bg-card hover:text-fg"
           >
-            Cerrar
+            {t('action.close')}
           </button>
         </div>
 
@@ -723,7 +729,9 @@ function ExercisePicker({
           <div className="mt-3 flex items-center gap-2">
             <span className="h-2.5 w-2.5 rounded-full" style={{ background: activeCategory.color ?? '#888' }} />
             <h2 className="text-lg font-semibold tracking-tight">{activeCategory.name}</h2>
-            <span className="text-xs text-muted">· {countByCat.get(activeCategory.id) ?? 0} ejercicios</span>
+            <span className="text-xs text-muted">
+              · {(() => { const n = countByCat.get(activeCategory.id) ?? 0; return n === 1 ? t('exercises.countSingular', { n }) : t('exercises.countPlural', { n }); })()}
+            </span>
           </div>
         )}
 
@@ -746,7 +754,7 @@ function ExercisePicker({
         {/* Body: groups index OR exercise list */}
         {showGroupsIndex ? (
           <div className="mt-3 flex-1 overflow-y-auto">
-            <div className="mb-2 text-xs text-muted">Elige un grupo muscular</div>
+            <div className="mb-2 text-xs text-muted">{t('picker.chooseGroup')}</div>
             <div className="grid grid-cols-2 gap-2">
               {categories.map((c) => {
                 const n = countByCat.get(c.id) ?? 0;
@@ -764,7 +772,7 @@ function ExercisePicker({
                         <span className="truncate font-semibold">{c.name}</span>
                       </span>
                       <span className="mt-0.5 text-[11px] text-muted">
-                        {n} ejerc{last ? ` · ${relativeDate(last)}` : ''}
+                        {t('picker.exerciseCountAbbrev', { n })}{last ? ` · ${relativeDate(last, t)}` : ''}
                       </span>
                     </div>
                     <svg className="shrink-0 text-muted transition group-hover:text-fg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
@@ -786,19 +794,19 @@ function ExercisePicker({
                     <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: e.category_color ?? '#888' }} />
                     <span className="truncate">{e.name}</span>
                   </span>
-                  {e.last_used && <span className="shrink-0 text-xs text-muted">{relativeDate(e.last_used)}</span>}
+                  {e.last_used && <span className="shrink-0 text-xs text-muted">{relativeDate(e.last_used, t)}</span>}
                 </button>
               </li>
             ))}
             {visibleExercises.length === 0 && (
               <li className="flex flex-col items-center justify-center gap-3 py-10 text-center text-sm text-muted">
-                <span>{isSearching ? `Sin resultados para "${query}"` : 'Este grupo aún no tiene ejercicios'}</span>
+                <span>{isSearching ? t('picker.noResultsFor', { q: query }) : t('picker.groupEmpty')}</span>
                 <button
                   type="button"
                   onClick={() => setCreatorOpen(true)}
                   className="btn-accent rounded-full px-4 py-2 text-xs"
                 >
-                  + Crear {isSearching && query.trim() ? `"${query.trim()}"` : 'nuevo ejercicio'}
+                  {isSearching && query.trim() ? t('picker.createQuoted', { name: query.trim() }) : t('picker.createGeneric')}
                 </button>
               </li>
             )}
@@ -808,7 +816,9 @@ function ExercisePicker({
         {!creatorOpen && !showGroupsIndex && (
           <div className="mt-2 flex shrink-0 items-center justify-between">
             <span className="text-[11px] text-muted">
-              {visibleExercises.length} resultado{visibleExercises.length === 1 ? '' : 's'}
+              {visibleExercises.length === 1
+                ? t('picker.resultCountSingular', { n: visibleExercises.length })
+                : t('picker.resultCountPlural', { n: visibleExercises.length })}
             </span>
             <button
               type="button"
@@ -816,7 +826,7 @@ function ExercisePicker({
               className="inline-flex items-center gap-1.5 rounded-full border border-border bg-elevated/60 px-3 py-1.5 text-xs font-medium text-fg transition hover:border-strong hover:bg-elevated"
             >
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M12 5v14" /><path d="M5 12h14" /></svg>
-              Crear ejercicio
+              {t('exercise.createBtn')}
             </button>
           </div>
         )}
@@ -846,6 +856,7 @@ function SetRow({
   onDelete: () => void;
   onDuplicate: () => void;
 }) {
+  const { t } = useT();
   if (editing) {
     return (
       <li className="bg-elevated/40 px-4 py-2.5">
@@ -909,8 +920,8 @@ function SetRow({
           type="button"
           onClick={onStartEdit}
           className="grid h-8 w-8 place-items-center rounded-md text-muted opacity-100 transition hover:bg-card hover:text-fg sm:opacity-0 sm:group-hover:opacity-100"
-          aria-label="Editar set"
-          title="Editar"
+          aria-label={t('workout.editSet')}
+          title={t('workout.edit')}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
@@ -921,8 +932,8 @@ function SetRow({
           type="button"
           onClick={onDelete}
           className="grid h-8 w-8 place-items-center rounded-md text-muted opacity-100 transition hover:bg-danger/10 hover:text-danger sm:opacity-0 sm:group-hover:opacity-100"
-          aria-label="Eliminar set"
-          title="Eliminar"
+          aria-label={t('workout.deleteSet')}
+          title={t('workout.delete')}
         >
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
         </button>
@@ -1135,7 +1146,7 @@ function QuickAddCardio({
         onMouseDown={(e) => e.preventDefault()}
         className="btn-accent grid h-[52px] w-[52px] shrink-0 place-items-center rounded-xl active:scale-95 disabled:opacity-40"
         disabled={!duration.trim()}
-        aria-label={justAdded ? 'Añadido' : 'Añadir serie'}
+        aria-label={justAdded ? tLocal('workout.added') : tLocal('workout.addSetAria')}
       >
         {justAdded ? (
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
@@ -1162,6 +1173,7 @@ function CreateExerciseForm({
   onCancel: () => void;
   onCreate: (name: string, categoryId: number) => Promise<void> | void;
 }) {
+  const { t } = useT();
   const [name, setName] = useState(initialName);
   const [categoryId, setCategoryId] = useState<number | null>(initialCategoryId);
   const [submitting, setSubmitting] = useState(false);
@@ -1177,16 +1189,16 @@ function CreateExerciseForm({
   return (
     <form onSubmit={submit} className="mt-3 rounded-xl border border-accent/40 bg-card p-3">
       <div className="mb-2 flex items-center justify-between">
-        <div className="section-title">Nuevo ejercicio</div>
+        <div className="section-title">{t('exercise.new')}</div>
         <button type="button" onClick={onCancel} className="text-xs text-muted hover:text-fg">
-          Cancelar
+          {t('action.cancel')}
         </button>
       </div>
       <input
         autoFocus
         value={name}
         onChange={(e) => setName(e.target.value)}
-        placeholder="Ej: Press Inclinado (mancuernas)"
+        placeholder={t('exercise.namePlaceholder')}
         className="w-full rounded-lg border border-border bg-elevated px-3 py-2 text-sm outline-none transition focus:border-accent/60"
       />
       <div className="no-scrollbar -mx-1 mt-2 flex gap-1.5 overflow-x-auto px-1">
@@ -1214,23 +1226,24 @@ function CreateExerciseForm({
         disabled={!name.trim() || !categoryId || submitting}
         className="btn-accent mt-3 w-full rounded-lg py-2 text-sm disabled:opacity-40"
       >
-        {submitting ? 'Creando…' : 'Crear y seleccionar'}
+        {submitting ? t('exercise.creating') : t('exercise.createAndSelect')}
       </button>
     </form>
   );
 }
 
 function PrBadges({ set }: { set: TrainingSet }) {
+  const { t } = useT();
   const badges: Array<{ label: string; title: string; cls: string; icon: React.ReactNode }> = [];
   // Pesa (dumbbell) — a new max weight was unlocked.
   if (set.pr_weight) badges.push({
-    label: 'W', title: 'Peso nuevo desbloqueado',
+    label: 'W', title: t('pr.weightUnlocked'),
     cls: 'bg-accent text-ink',
     icon: <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="m6.5 6.5 11 11"/><path d="m21 21-1-1"/><path d="m3 3 1 1"/><path d="m18 22 4-4"/><path d="m2 6 4-4"/><path d="m3 10 7-7"/><path d="m14 21 7-7"/></svg>,
   });
   // Copa (trophy) — more reps than ever at this weight or heavier.
   if (set.pr_reps) badges.push({
-    label: 'R', title: 'Récord de repeticiones',
+    label: 'R', title: t('pr.repsRecord'),
     cls: 'bg-accent text-ink',
     icon: <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M7.5 2h9l1.5 3h3.5l-2.5 5a6 6 0 0 1-4.4 3.85L14 18h2v2H8v-2h2l-.6-4.15A6 6 0 0 1 5 10L2.5 5H6z"/></svg>,
   });
@@ -1291,12 +1304,12 @@ function formatDistance(meters: number): string {
   return `${Math.round(meters)} m`;
 }
 
-function relativeDate(iso: string) {
+function relativeDate(iso: string, t: (key: string, vars?: Record<string, string | number>) => string) {
   const diffDays = Math.round((Date.now() - new Date(iso).getTime()) / 86_400_000);
-  if (diffDays === 0) return 'hoy';
-  if (diffDays === 1) return 'ayer';
-  if (diffDays < 7) return `hace ${diffDays}d`;
-  if (diffDays < 30) return `hace ${Math.floor(diffDays / 7)}sem`;
-  if (diffDays < 365) return `hace ${Math.floor(diffDays / 30)}m`;
-  return `hace ${Math.floor(diffDays / 365)}a`;
+  if (diffDays === 0) return t('rel.today');
+  if (diffDays === 1) return t('rel.yesterday');
+  if (diffDays < 7) return t('rel.daysAgo', { n: diffDays });
+  if (diffDays < 30) return t('rel.weeksAgo', { n: Math.floor(diffDays / 7) });
+  if (diffDays < 365) return t('rel.monthsAgo', { n: Math.floor(diffDays / 30) });
+  return t('rel.yearsAgo', { n: Math.floor(diffDays / 365) });
 }

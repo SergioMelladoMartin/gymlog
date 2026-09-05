@@ -4,6 +4,7 @@ import { ClientRouter, fade } from 'astro:transitions';
 import SideNav from '../components/SideNav';
 import SyncStatus from '../components/SyncStatus';
 import Onboarding from '../components/Onboarding';
+import UIHost from '../components/ui/UIHost';
 
 interface Props {
   title?: string;
@@ -20,6 +21,18 @@ const navTitle = {
   stats: 'Estadísticas',
   login: 'Acceso',
 }[activeNav];
+
+// i18n key mirroring the above so the client script below can swap the text
+// to English without a reload when the stored language is 'en'. Server-side
+// render always shows the Spanish default (no FOUC on the common case).
+const navTitleKey = {
+  today: 'nav.today',
+  calendar: 'nav.calendar',
+  diary: 'nav.diary',
+  exercises: 'nav.exercises',
+  stats: 'nav.stats',
+  login: 'nav.login',
+}[activeNav];
 ---
 <html lang="es">
   <head>
@@ -28,10 +41,10 @@ const navTitle = {
     <meta name="theme-color" content="#0f0f15" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="manifest" href="/manifest.webmanifest" />
-    <link rel="preconnect" href="https://rsms.me/" />
-    <!-- Font files load with CORS; that connection needs its own preconnect. -->
-    <link rel="preconnect" href="https://rsms.me/" crossorigin />
-    <link rel="stylesheet" href="https://rsms.me/inter/inter.css" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="gymlog" />
     <title>{title}</title>
     <ClientRouter />
     <script is:inline data-astro-rerun>
@@ -48,6 +61,24 @@ const navTitle = {
           // body may not exist yet during <head>; the class is also applied
           // inline below as a fallback through the data attribute.
           window.__gymlogSidenavCollapsed = collapsed;
+        } catch (e) {}
+      })();
+    </script>
+    <script is:inline data-astro-rerun>
+      // Swap the nav title to the stored language, client-side only, using
+      // the same dictionaries as src/lib/i18n.ts (kept inline so this runs
+      // before the React islands hydrate, avoiding a flash of Spanish→English).
+      (function () {
+        try {
+          var lang = localStorage.getItem('gymlog-lang');
+          if (lang !== 'en') return;
+          var EN = {
+            'nav.today': 'Today', 'nav.calendar': 'Calendar', 'nav.diary': 'Diary',
+            'nav.exercises': 'Exercises', 'nav.stats': 'Stats', 'nav.login': 'Sign in',
+          };
+          var el = document.querySelector('[data-navtitle-key]');
+          var key = el && el.getAttribute('data-navtitle-key');
+          if (el && key && EN[key]) el.textContent = EN[key];
         } catch (e) {}
       })();
     </script>
@@ -122,7 +153,7 @@ const navTitle = {
               <path d="M6.404 12.768a2 2 0 1 1-2.829-2.829l1.768-1.767a2 2 0 1 1-2.828-2.829l2.828-2.828a2 2 0 1 1 2.829 2.828l1.767-1.768a2 2 0 1 1 2.829 2.829z" />
             </svg>
           </a>
-          <span class="truncate text-[15px] font-semibold tracking-tight">{navTitle}</span>
+          <span class="truncate text-[15px] font-semibold tracking-tight" data-navtitle-key={navTitleKey}>{navTitle}</span>
         </div>
         {activeNav !== 'login' && <SyncStatus client:only="react" transition:persist="sync-status" />}
       </div>
@@ -132,5 +163,6 @@ const navTitle = {
       <slot />
     </main>
     {activeNav !== 'login' && <Onboarding client:only="react" />}
+    <UIHost client:only="react" transition:persist="ui-host" />
   </body>
 </html>

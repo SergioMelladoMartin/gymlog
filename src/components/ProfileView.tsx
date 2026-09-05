@@ -4,6 +4,7 @@ import { getDb } from '../lib/sqlite';
 import { getWeeklyStreak } from '../lib/queries';
 import { useDatabase } from '../hooks/useDatabase';
 import { useT } from '../hooks/useT';
+import { getLocale } from '../lib/i18n';
 
 interface Stats {
   totalSets: number;
@@ -55,7 +56,7 @@ export default function ProfileView() {
     );
   }
 
-  const locale = lang === 'en' ? 'en-US' : 'es-ES';
+  const locale = getLocale(lang);
   const fmt = (n: number) => Math.round(n).toLocaleString(locale);
   const prettyDate = (iso: string | null) =>
     iso ? new Date(iso + 'T00:00:00').toLocaleDateString(locale, { day: 'numeric', month: 'long', year: 'numeric' }) : '—';
@@ -85,7 +86,7 @@ export default function ProfileView() {
         )}
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <div className="truncate text-xl font-semibold tracking-tight">{user?.name ?? 'Usuario'}</div>
+            <div className="truncate text-xl font-semibold tracking-tight">{user?.name ?? t('login.usernameFallback')}</div>
             {streak > 0 && (
               <span
                 title={t('profile.streak')}
