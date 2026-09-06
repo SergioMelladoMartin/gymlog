@@ -2,11 +2,16 @@
 import { defineConfig } from 'astro/config';
 import react from '@astrojs/react';
 import tailwindcss from '@tailwindcss/vite';
+import vercel from '@astrojs/vercel';
 
-// Fully static: no server, no API routes. All data lives in the user's
-// browser (sqlite-wasm + OPFS) and syncs to their Google Drive.
+// Static-first: every page is a static file, exactly as before. The only
+// on-demand code is the tiny OAuth backend under src/pages/api/auth/*
+// (each of those files opts in with `export const prerender = false`).
+// All workout data still lives in the user's browser (sqlite-wasm + OPFS)
+// and syncs straight to their Google Drive — Vercel never sees it.
 export default defineConfig({
   output: 'static',
+  adapter: vercel(),
   integrations: [react()],
   // 'hover' instead of 'load': with 'load', pages like the diary (dozens of
   // unique /day?d=… hrefs, all resolving to the same static shell) fired a
