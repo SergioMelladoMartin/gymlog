@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useMemo } from 'react';
 import {
   Bar,
   BarChart,
@@ -8,8 +8,6 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { useT } from '../hooks/useT';
-import { getLocale } from '../lib/i18n';
 
 export interface TrendPoint {
   label: string;
@@ -40,21 +38,12 @@ export default function StatsTrendChart({
   data: TrendPoint[];
   unit?: string;
 }) {
-  const { t, lang } = useT();
-  const locale = getLocale(lang);
-  const [colors, setColors] = useState(readCssColors);
-
-  useEffect(() => {
-    setColors(readCssColors());
-    const obs = new MutationObserver(() => setColors(readCssColors()));
-    obs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'data-accent'] });
-    return () => obs.disconnect();
-  }, []);
+  const colors = useMemo(readCssColors, []);
 
   if (!data.length) {
     return (
       <div className="flex h-56 items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted">
-        {t('stats.noDataPeriod')}
+        Sin datos en este periodo.
       </div>
     );
   }
@@ -96,7 +85,7 @@ export default function StatsTrendChart({
                   <div className="font-medium text-fg">{p.label}</div>
                   <div className="mt-0.5 tabular-nums">
                     <span className="text-base font-semibold tracking-tight">
-                      {Math.round(p.value).toLocaleString(locale)}
+                      {Math.round(p.value).toLocaleString('es-ES')}
                     </span>
                     {unit && <span className="ml-0.5 text-[10px] text-muted">{unit}</span>}
                   </div>

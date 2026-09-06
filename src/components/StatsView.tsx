@@ -1,9 +1,9 @@
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useDatabase } from '../hooks/useDatabase';
+import { useLocale } from '../hooks/useLocale';
 import { getDb } from '../lib/sqlite';
-import { useT } from '../hooks/useT';
-import { getLocale } from '../lib/i18n';
-import { StatsSkeleton } from './ui/Skeleton';
+import EmptyState from './EmptyState';
+import { ChartSkeleton, StatsSkeleton } from './Skeleton';
 
 const StatsTrendChart = lazy(() => import('./StatsTrendChart'));
 
@@ -19,18 +19,23 @@ function argbToHex(n: number | null): string | null {
   return '#' + [(u >> 16) & 0xff, (u >> 8) & 0xff, u & 0xff].map((v) => v.toString(16).padStart(2, '0')).join('');
 }
 
+function rangeLabel(range: Range, year: number, t: (k: string, v?: Record<string, string | number>) => string): string {
+  switch (range) {
+    case '7d': return t('stats.range7d');
+    case '30d': return t('stats.range30d');
+    case '90d': return t('stats.range90d');
+    case '365d': return t('stats.range365d');
+    case 'year':
+      return year === new Date().getFullYear()
+        ? t('stats.rangeYear')
+        : t('stats.rangeYearNamed', { year });
+    default: return t('stats.rangeAll');
+  }
+}
+
 export default function StatsView() {
-  const { t, lang } = useT();
-  const locale = getLocale(lang);
-
-  const TREND_METRICS: Array<{ id: TrendMetric; label: string; field: keyof Omit<TrendRow, 'period'>; unit?: string }> = [
-    { id: 'workouts', label: t('stats.metric.workouts'), field: 'days' },
-    { id: 'volume',   label: t('stats.metric.volume'),  field: 'volume', unit: 'kg' },
-    { id: 'sets',     label: t('stats.metric.sets'),   field: 'sets' },
-    { id: 'reps',     label: t('stats.metric.reps'),     field: 'reps' },
-  ];
-
-  const ready = useDatabase();
+  const { ready, revision } = useDatabase();
+  const { t, fmt, fmtDate, weekdaysLong, weekdaysNarrow } = useLocale();
   const url = typeof window !== 'undefined' ? new URL(window.location.href) : null;
   const range = (url?.searchParams.get('range') ?? 'all') as Range;
   const year = Number(url?.searchParams.get('year') ?? new Date().getFullYear());
@@ -39,15 +44,17 @@ export default function StatsView() {
   const [perCat, setPerCat] = useState<Array<{ id: number; name: string; color: string | null; set_count: number; volume: number }>>([]);
   const [top, setTop] = useState<Array<{ id: number; name: string; color: string | null; set_count: number }>>([]);
   const [weekday, setWeekday] = useState<number[]>([0, 0, 0, 0, 0, 0, 0]);
-  const [label, setLabel] = useState(t('stats.range.all'));
-
-  // Trend card has its own controls (independent of the range chips): it
-  // always shows the most recent 12 weeks or months.
   const [groupBy, setGroupBy] = useState<GroupBy>('week');
   const [trendMetric, setTrendMetric] = useState<TrendMetric>('workouts');
   const [trend, setTrend] = useState<TrendRow[]>([]);
-  // Weeks span a wider window than months so the bars cover a useful period.
   const trendLimit = groupBy === 'week' ? 54 : 12;
+
+  const trendMetrics = useMemo(() => ([
+    { id: 'workouts' as const, label: t('stats.metricWorkouts'), field: 'days' as const, unit: undefined },
+    { id: 'volume' as const, label: t('stats.metricVolume'), field: 'volume' as const, unit: t('common.kg') },
+    { id: 'sets' as const, label: t('stats.metricSets'), field: 'sets' as const, unit: undefined },
+    { id: 'reps' as const, label: t('stats.metricReps'), field: 'reps' as const, unit: undefined },
+  ]), [t]);
 
   useEffect(() => {
     if (!ready) return;
@@ -55,27 +62,21 @@ export default function StatsView() {
     const q = (sql: string, params: any[] = []) =>
       db.exec({ sql, bind: params, rowMode: 'object', returnValue: 'resultRows' }) as any[];
 
-    // Build the range predicate once, separately for an aliased vs unaliased
-    // training_log so the `date(...)` function call never gets prefixed with
-    // a table alias (that was producing invalid SQL like `ts.date('now', …)`
-    // and blanking the page on every range except "Todo").
-    let pred = ''; let args: any[] = []; let lbl = t('stats.range.all');
+    let pred = ''; let args: any[] = [];
     switch (range) {
-      case '7d':   pred = "DATECOL >= date('now', '-7 days')";   lbl = t('stats.range.7d'); break;
-      case '30d':  pred = "DATECOL >= date('now', '-30 days')";  lbl = t('stats.range.30d'); break;
-      case '90d':  pred = "DATECOL >= date('now', '-90 days')";  lbl = t('stats.range.90d'); break;
-      case '365d': pred = "DATECOL >= date('now', '-365 days')"; lbl = t('stats.range.365d'); break;
+      case '7d':   pred = "DATECOL >= date('now', '-7 days')"; break;
+      case '30d':  pred = "DATECOL >= date('now', '-30 days')"; break;
+      case '90d':  pred = "DATECOL >= date('now', '-90 days')"; break;
+      case '365d': pred = "DATECOL >= date('now', '-365 days')"; break;
       case 'year':
         pred = 'DATECOL >= ? AND DATECOL <= ?';
         args = [`${year}-01-01`, `${year}-12-31`];
-        lbl = year === new Date().getFullYear() ? t('stats.range.yearCurrent') : t('stats.range.year', { year });
         break;
     }
     const where = pred ? `WHERE ${pred.replace(/DATECOL/g, 'date')}` : '';
     const whereTs = pred ? `WHERE ${pred.replace(/DATECOL/g, 'ts.date')}` : '';
-    setLabel(lbl);
 
-    const totalsRow = q(
+    const row = q(
       `SELECT COUNT(*) AS total_sets, COUNT(DISTINCT date) AS total_days,
               COUNT(DISTINCT exercise_id) AS total_exercises,
               SUM(metric_weight * reps) AS total_volume
@@ -83,10 +84,10 @@ export default function StatsView() {
       args,
     )[0];
     setTotals({
-      total_sets: Number(totalsRow?.total_sets ?? 0),
-      total_days: Number(totalsRow?.total_days ?? 0),
-      total_exercises: Number(totalsRow?.total_exercises ?? 0),
-      total_volume: Number(totalsRow?.total_volume ?? 0),
+      total_sets: Number(row?.total_sets ?? 0),
+      total_days: Number(row?.total_days ?? 0),
+      total_exercises: Number(row?.total_exercises ?? 0),
+      total_volume: Number(row?.total_volume ?? 0),
     });
 
     const pc = q(
@@ -123,17 +124,14 @@ export default function StatsView() {
     const wm = new Map<number, number>();
     for (const r of wk as any[]) wm.set(Number(r.dow), Number(r.c));
     setWeekday([1, 2, 3, 4, 5, 6, 0].map((d) => wm.get(d) ?? 0));
-  }, [ready, range, year]);
+  }, [ready, revision, range, year]);
 
-  // ── Trend over time (last 12 weeks / months) ───────────────────────────
   useEffect(() => {
     if (!ready) return;
     const db = getDb();
     const q = (sql: string) =>
       db.exec({ sql, rowMode: 'object', returnValue: 'resultRows' }) as any[];
 
-    // Week → the Monday that starts each week; Month → 'YYYY-MM'. Aggregate
-    // every metric per period in one pass; the UI picks which to plot.
     const periodExpr = groupBy === 'week'
       ? "date(date, '-' || ((strftime('%w', date) + 6) % 7) || ' days')"
       : "strftime('%Y-%m', date)";
@@ -148,7 +146,6 @@ export default function StatsView() {
        ORDER BY period DESC
        LIMIT ${trendLimit}`,
     );
-    // Reverse to chronological order for the chart.
     setTrend(
       rowsT.reverse().map((r: any) => ({
         period: String(r.period),
@@ -158,44 +155,56 @@ export default function StatsView() {
         volume: Number(r.volume ?? 0),
       })),
     );
-  }, [ready, groupBy, trendLimit]);
+  }, [ready, revision, groupBy, trendLimit]);
 
   if (!ready) return <StatsSkeleton />;
 
+  const label = rangeLabel(range, year, t);
   const maxVolume = perCat.reduce((a, c) => Math.max(a, c.volume), 0);
   const weekdayMax = Math.max(1, ...weekday);
-  const fmt = (n: number) => Math.round(n).toLocaleString(locale);
   const currentYear = new Date().getFullYear();
   const chips: Array<{ id: Range; label: string; href: string; match: boolean }> = [
-    { id: '7d', label: '7d', href: '/stats?range=7d', match: range === '7d' },
-    { id: '30d', label: '30d', href: '/stats?range=30d', match: range === '30d' },
-    { id: '90d', label: '90d', href: '/stats?range=90d', match: range === '90d' },
-    { id: '365d', label: t('stats.chip.year'), href: '/stats?range=365d', match: range === '365d' },
-    { id: 'year', label: 'YTD', href: `/stats?range=year&year=${currentYear}`, match: range === 'year' && year === currentYear },
-    { id: 'all', label: t('stats.chip.all'), href: '/stats', match: range === 'all' },
+    { id: '7d', label: t('stats.chip7d'), href: '/stats?range=7d', match: range === '7d' },
+    { id: '30d', label: t('stats.chip30d'), href: '/stats?range=30d', match: range === '30d' },
+    { id: '90d', label: t('stats.chip90d'), href: '/stats?range=90d', match: range === '90d' },
+    { id: '365d', label: t('stats.chip1y'), href: '/stats?range=365d', match: range === '365d' },
+    { id: 'year', label: t('stats.chipYtd'), href: `/stats?range=year&year=${currentYear}`, match: range === 'year' && year === currentYear },
+    { id: 'all', label: t('stats.chipAll'), href: '/stats', match: range === 'all' },
   ];
 
-  const activeTrend = TREND_METRICS.find((m) => m.id === trendMetric)!;
+  const activeTrend = trendMetrics.find((m) => m.id === trendMetric)!;
   const trendData = trend.map((r) => ({
     label: groupBy === 'week'
-      ? new Date(r.period + 'T00:00:00').toLocaleDateString(locale, { day: 'numeric', month: 'short' }).replace('.', '')
-      : new Date(r.period + '-01T00:00:00').toLocaleDateString(locale, { month: 'short', year: '2-digit' }).replace('.', ''),
+      ? fmtDate(r.period, { day: 'numeric', month: 'short' })
+      : fmtDate(r.period + '-01', { month: 'short', year: '2-digit' }),
     value: Number(r[activeTrend.field]),
   }));
+
+  const weekdayLong = weekdaysLong();
+  const weekdayShort = weekdaysNarrow();
+  const hasAnyData = totals.total_sets > 0;
 
   return (
     <>
       <div className="mb-5">
-        <div className="text-xs font-medium uppercase tracking-wider text-muted">{t('stats.yourProgress')}</div>
-        <h1 className="text-3xl font-semibold tracking-tight">{t('nav.stats')}</h1>
+        <div className="text-xs font-medium uppercase tracking-wider text-muted">{t('stats.subtitle')}</div>
+        <h1 className="text-3xl font-semibold tracking-tight">{t('stats.title')}</h1>
       </div>
 
-      {/* ── Zone 1 · Evolución (its own week/month window, independent of the
-          range chips below) ─────────────────────────────────────────────── */}
+      {!hasAnyData && (
+        <div className="mb-6">
+          <EmptyState variant="stats" />
+        </div>
+      )}
+
       <div className="card mb-6 p-4">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div className="section-title">
-            {t('stats.evolution')} · {groupBy === 'week' ? t('stats.weeks', { n: trendLimit }) : t('stats.months', { n: trendLimit })}
+            {t('stats.evolution', {
+              period: groupBy === 'week'
+                ? t('stats.weeks', { n: trendLimit })
+                : t('stats.months', { n: trendLimit }),
+            })}
           </div>
           <div className="flex gap-1 rounded-full border border-border bg-card p-0.5 text-[11px] font-medium">
             {(['week', 'month'] as const).map((g) => (
@@ -203,7 +212,7 @@ export default function StatsView() {
                 key={g}
                 type="button"
                 onClick={() => setGroupBy(g)}
-                className={`rounded-full px-3 py-1 transition active:scale-[0.97] ${groupBy === g ? 'btn-accent' : 'text-muted hover:text-fg'}`}
+                className={`rounded-full px-3 py-1 transition ${groupBy === g ? 'btn-accent' : 'text-muted hover:text-fg'}`}
               >
                 {g === 'week' ? t('stats.week') : t('stats.month')}
               </button>
@@ -212,27 +221,25 @@ export default function StatsView() {
         </div>
 
         <div className="no-scrollbar mb-3 -mx-1 flex gap-1.5 overflow-x-auto px-1">
-          {TREND_METRICS.map((m) => (
+          {trendMetrics.map((m) => (
             <button
               key={m.id}
               type="button"
               onClick={() => setTrendMetric(m.id)}
-              className={`shrink-0 rounded-full px-3 py-1 text-[11px] font-medium transition active:scale-[0.97] ${trendMetric === m.id ? 'btn-accent' : 'bg-elevated/50 text-muted hover:bg-elevated hover:text-fg'}`}
+              className={`shrink-0 rounded-full px-3 py-1 text-[11px] font-medium transition ${trendMetric === m.id ? 'btn-accent' : 'bg-elevated/50 text-muted hover:bg-elevated hover:text-fg'}`}
             >
               {m.label}
             </button>
           ))}
         </div>
 
-        <Suspense fallback={<div className="grid h-56 place-items-center"><div className="h-7 w-7 animate-spin rounded-full border-2 border-border border-t-accent" /></div>}>
+        <Suspense fallback={<ChartSkeleton />}>
           <StatsTrendChart data={trendData} unit={activeTrend.unit} />
         </Suspense>
       </div>
 
-      {/* ── Zone 2 · Resumen del periodo — everything below is scoped to the
-          selected range chip ────────────────────────────────────────────── */}
       <div className="mb-2 flex items-baseline justify-between gap-2">
-        <div className="section-title">{t('stats.summary')}</div>
+        <div className="section-title">{t('stats.periodSummary')}</div>
         <div className="text-xs capitalize text-muted">{label}</div>
       </div>
 
@@ -243,19 +250,16 @@ export default function StatsView() {
       </div>
 
       <div className="mb-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <Tile label={t('calendar.days')} value={String(totals.total_days)} />
+        <Tile label={t('profile.days')} value={String(totals.total_days)} />
         <Tile label={t('workout.sets')} value={fmt(totals.total_sets)} />
-        <Tile label={t('nav.exercises')} value={String(totals.total_exercises)} />
-        <Tile label={t('stats.metric.volume')} value={`${Math.round(totals.total_volume / 1000)}k`} unit="kg" />
+        <Tile label={t('profile.exercises')} value={String(totals.total_exercises)} />
+        <Tile label={t('profile.volume')} value={`${Math.round(totals.total_volume / 1000)}k`} unit={t('common.kg')} />
       </div>
 
       <div className="card mb-5 p-4">
         <div className="section-title mb-3">{t('stats.weeklyDistribution')}</div>
         <ul className="flex flex-col gap-2 sm:hidden">
-          {[
-            t('weekday.full.mon'), t('weekday.full.tue'), t('weekday.full.wed'),
-            t('weekday.full.thu'), t('weekday.full.fri'), t('weekday.full.sat'), t('weekday.full.sun'),
-          ].map((l, i) => {
+          {weekdayLong.map((l, i) => {
             const v = weekday[i];
             const pct = weekdayMax ? (v / weekdayMax) * 100 : 0;
             return (
@@ -270,10 +274,7 @@ export default function StatsView() {
           })}
         </ul>
         <div className="hidden items-end gap-2 sm:flex">
-          {[
-            t('weekday.letter.mon'), t('weekday.letter.tue'), t('weekday.letter.wed'),
-            t('weekday.letter.thu'), t('weekday.letter.fri'), t('weekday.letter.sat'), t('weekday.letter.sun'),
-          ].map((l, i) => {
+          {weekdayShort.map((l, i) => {
             const v = weekday[i];
             const h = Math.max(4, (v / weekdayMax) * 72);
             return (
@@ -291,7 +292,9 @@ export default function StatsView() {
 
       <div className="card mb-5 p-4">
         <div className="section-title mb-3">{t('stats.volumeByCategory')}</div>
-        {perCat.length === 0 ? <div className="py-6 text-center text-sm text-muted">{t('stats.noData')}</div> : (
+        {perCat.length === 0 ? (
+          <div className="py-4 text-center text-sm text-muted">{t('common.noData')}</div>
+        ) : (
           <ul className="flex flex-col gap-3">
             {perCat.map((c) => (
               <li key={c.id}>
@@ -300,7 +303,9 @@ export default function StatsView() {
                     <span className="h-2 w-2 rounded-full" style={{ background: c.color ?? '#888' }} />
                     <span className="font-medium">{c.name}</span>
                   </span>
-                  <span className="tabular-nums text-muted">{fmt(c.volume)} kg · {c.set_count} sets</span>
+                  <span className="tabular-nums text-muted">
+                    {t('stats.categoryVolume', { vol: fmt(c.volume), sets: c.set_count })}
+                  </span>
                 </div>
                 <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-elevated">
                   <div className="h-full rounded-full transition-all" style={{ width: `${maxVolume ? (c.volume / maxVolume) * 100 : 0}%`, background: c.color ?? '#888', boxShadow: `0 0 8px ${c.color ?? 'transparent'}55` }} />
@@ -312,8 +317,10 @@ export default function StatsView() {
       </div>
 
       <div className="card p-4">
-        <div className="section-title mb-2">{t('stats.top10')}</div>
-        {top.length === 0 ? <div className="py-6 text-center text-sm text-muted">{t('stats.noData')}</div> : (
+        <div className="section-title mb-2">{t('stats.topExercises')}</div>
+        {top.length === 0 ? (
+          <div className="py-4 text-center text-sm text-muted">{t('common.noData')}</div>
+        ) : (
           <ul className="divide-y divide-border">
             {top.map((e, i) => (
               <li key={e.id}>
@@ -338,7 +345,7 @@ function Tile({ label, value, unit }: { label: string; value: string; unit?: str
   return (
     <div className="stat-tile">
       <div className="section-title">{label}</div>
-      <div className="mt-0.5 font-display text-2xl font-semibold tabular-nums tracking-tight">
+      <div className="mt-0.5 text-2xl font-semibold tabular-nums tracking-tight">
         {value}{unit && <span className="ml-1 text-sm font-medium text-muted">{unit}</span>}
       </div>
     </div>

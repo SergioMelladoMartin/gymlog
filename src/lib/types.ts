@@ -1,3 +1,6 @@
+// Shared data model for the local-first architecture. Serialised as JSON in
+// the user's Google Drive appdata folder and mirrored locally in IndexedDB.
+
 export interface Category {
   id: number;
   name: string;
@@ -28,6 +31,24 @@ export interface TrainingSet {
 export interface BodyWeight {
   date: string;
   weight_kg: number;
+}
+
+export interface Settings {
+  theme?: 'light' | 'dark';
+  accent?: AccentKey;
+}
+
+export type AccentKey = 'lime' | 'rose' | 'sky' | 'amber' | 'violet' | 'mono';
+
+export interface GymlogData {
+  version: 1;
+  updatedAt: string;
+  categories: Category[];
+  exercises: Exercise[];
+  sets: TrainingSet[];
+  comments: Record<string, string>; // date -> body
+  body_weight: BodyWeight[];
+  settings?: Settings;
 }
 
 /** PR flags computed on the fly for a given exercise's history.

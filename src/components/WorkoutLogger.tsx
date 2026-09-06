@@ -1,25 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { Category } from '../lib/types';
 import type { ExerciseExtra as Exercise, TrainingSetEx } from '../lib/queries';
 import {
-  copySetsFromDate as qCopySets,
   createExercise as qCreateExercise,
   createSet as qCreateSet,
   deleteExerciseFromDay as qDeleteExerciseFromDay,
   deleteSet as qDeleteSet,
   duplicateSet as qDuplicateSet,
-  getLastTrainingDateBefore as qLastTrainingDate,
   getSetsForDate as qGetSets,
   setWorkoutComment as qSetComment,
   updateSet as qUpdateSet,
 } from '../lib/queries';
+import { useLocale } from '../hooks/useLocale';
 import { useT } from '../hooks/useT';
-import { getLocale } from '../lib/i18n';
-import { useConfirm } from './ui/ConfirmDialog';
-import { toast } from './ui/Toast';
-import RestTimer from './RestTimer';
-import BottomSheet from './ui/BottomSheet';
-import { hapticLight, hapticDelete, hapticPr } from '../lib/haptics';
+import { hapticLight, hapticDelete, hapticPr, hapticMedium } from '../lib/haptics';
+import EmptyState from './EmptyState';
 
 // Runtime set shape used by the logger — extended query type with PR flags
 // and the legacy `is_personal_record` for backwards compat with the UI.
@@ -46,8 +42,7 @@ interface DraftSet {
 }
 
 export default function WorkoutLogger({ date, exercises: initialExercises, categories, initialSets, initialComment, onSetsChange }: Props) {
-  const { t, lang } = useT();
-  const confirm = useConfirm();
+  const { t } = useLocale();
   const [exercises, setExercises] = useState<Exercise[]>(initialExercises);
   const [sets, setSets] = useState<TrainingSet[]>(initialSets);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -61,7 +56,6 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
   // so the sets you've already logged stay easy to read — the form was
   // cluttering the view when it was always-on.
   const [openAdderId, setOpenAdderId] = useState<number | null>(null);
-  const [copying, setCopying] = useState(false);
 
   // Sync incoming props when the parent finishes loading data from the
   // in-browser db. `useState(initialSets)` only reads props on first render,
@@ -116,15 +110,9 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
     const result = qCreateSet({ exercise_id: exerciseId, date, weight_kg: weight, reps });
     refreshSets();
     setPendingExerciseIds((prev) => prev.filter((id) => id !== exerciseId));
-    setSetTick((x) => x + 1);
     // Light tap on save, stronger triple-buzz if we just set a PR.
-    if (result?.pr_weight || result?.pr_reps) {
-      hapticPr();
-      const exName = exercises.find((e) => e.id === exerciseId)?.name ?? '';
-      announcePr(exName, weight, reps, t);
-    } else {
-      hapticLight();
-    }
+    if (result?.pr_weight || result?.pr_reps) hapticPr();
+    else hapticLight();
   }
 
   function addCardioSet(exerciseId: number, durationSec: number, distanceM: number) {
@@ -138,7 +126,6 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
     });
     refreshSets();
     setPendingExerciseIds((prev) => prev.filter((id) => id !== exerciseId));
-    setSetTick((x) => x + 1);
     hapticLight();
   }
 
@@ -146,31 +133,26 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
     qDuplicateSet(setId);
     refreshSets();
     setEditingSetId(null);
-    setSetTick((x) => x + 1);
-    hapticLight();
+    hapticMedium();
   }
 
   function deleteSet(id: number) {
     qDeleteSet(id);
     refreshSets();
+    hapticDelete();
   }
 
-  async function removeExerciseFromDay(exerciseId: number, exSets: TrainingSet[]) {
-    if (exSets.length > 0) {
-      const name = exercises.find((e) => e.id === exerciseId)?.name ?? `#${exerciseId}`;
-      const ok = await confirm({
-        body: t('workout.confirmRemoveExercise', { name }),
-        confirmLabel: t('action.delete'),
-        destructive: true,
-      });
-      if (!ok) return;
+  function removeExerciseFromDay(exerciseId: number, hasSets: boolean) {
+    if (hasSets) {
+      const ex = exercises.find((e) => e.id === exerciseId);
+      const name = ex?.name ?? `#${exerciseId}`;
+      if (!window.confirm(t('workout.confirmRemoveExercise', { name }))) return;
       qDeleteExerciseFromDay(exerciseId, date);
       refreshSets();
     } else {
       setPendingExerciseIds((prev) => prev.filter((id) => id !== exerciseId));
     }
     if (openAdderId === exerciseId) setOpenAdderId(null);
-    if (editingSetId != null && exSets.some((s) => s.id === editingSetId)) setEditingSetId(null);
     hapticDelete();
   }
 
@@ -217,7 +199,7 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
       setExercises((prev) => [...prev, ex]);
       return ex;
     } catch (e: any) {
-      toast.error(e?.message ?? t('exercise.errorCreate'));
+      alert(e?.message ?? t('common.errorCreateExercise'));
       return null;
     }
   }
@@ -232,28 +214,6 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
     return [...grouped, ...pending];
   }, [grouped, pendingExerciseIds]);
 
-  // "Repeat last workout" — only offered on a day with nothing logged yet.
-  const lastTrainingDate = useMemo(() => {
-    if (allCards.length > 0) return null;
-    try { return qLastTrainingDate(date); } catch { return null; }
-  }, [allCards.length, date]);
-
-  function copyLastWorkout() {
-    if (!lastTrainingDate || copying) return;
-    setCopying(true);
-    try {
-      qCopySets(lastTrainingDate, date);
-      refreshSets();
-      hapticLight();
-    } catch (e) {
-      console.error('[copyLastWorkout]', e);
-    } finally {
-      setCopying(false);
-    }
-  }
-
-  const locale = getLocale(lang);
-
   // PR summary for today
   const prTotals = useMemo(() => {
     let w = 0, r = 0;
@@ -263,17 +223,6 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
     }
     return { w, r, any: w + r };
   }, [sets]);
-
-  // Rest timer: bumped after every logged set so <RestTimer> can auto-start
-  // when its "auto" toggle is on.
-  const [setTick, setSetTick] = useState(0);
-
-  // Listen for the "Hoy" hero FAB (mobile), which opens the same picker.
-  useEffect(() => {
-    const open = () => setPickerOpen(true);
-    window.addEventListener('gymlog:open-exercise-picker', open);
-    return () => window.removeEventListener('gymlog:open-exercise-picker', open);
-  }, []);
 
   return (
     <div className="flex flex-col gap-5">
@@ -299,153 +248,91 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
       <button
         type="button"
         onClick={() => setPickerOpen(true)}
-        className="flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-border bg-card/60 px-4 py-3.5 text-sm font-semibold text-fg transition hover:border-strong hover:bg-elevated"
+        className={`flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed px-4 text-sm font-semibold text-fg transition hover:border-strong hover:bg-elevated ${
+          allCards.length === 0
+            ? 'border-accent/40 bg-accent-soft/30 py-5'
+            : 'border-border bg-card/60 py-3.5'
+        }`}
       >
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M12 5v14" /><path d="M5 12h14" /></svg>
         {t('workout.addExercise')}
       </button>
 
-      {allCards.length === 0 ? (
-        <div className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border bg-card/40 px-4 py-10 text-center">
-          <div className="text-base font-semibold tracking-tight">{t('workout.noExercisesTitle')}</div>
-          <div className="text-sm text-muted">{t('workout.noExercisesBody')}</div>
-          {lastTrainingDate && (
-            <>
-              <button
-                type="button"
-                onClick={copyLastWorkout}
-                disabled={copying}
-                className="btn-accent mt-3 inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm disabled:opacity-50"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                </svg>
-                {copying ? t('workout.copying') : t('workout.copyYesterday')}
-              </button>
-              <div className="text-[11px] text-muted">
-                {t('workout.copyYesterdayHint', {
-                  date: new Date(lastTrainingDate + 'T00:00:00').toLocaleDateString(locale, { weekday: 'short', day: 'numeric', month: 'short' }),
-                })}
-              </div>
-            </>
-          )}
-        </div>
-      ) : (
+      {allCards.length > 0 && (
         <div className="flex flex-col gap-3">
           {allCards.map(({ exerciseId, sets: exSets }) => {
             const ex = exercises.find((e) => e.id === exerciseId);
             const cardio = isCardioExercise(exerciseId);
-            const totalVol = exSets.reduce((acc, s) => acc + s.weight_kg * s.reps, 0);
-            const totalDuration = exSets.reduce((acc, s) => acc + s.duration_seconds, 0);
-            const totalDistance = exSets.reduce((acc, s) => acc + s.distance_m, 0);
             const catColor = ex?.category_color ?? '#888';
+            const catName = ex?.category_name ?? categoryById.get(exerciseId)?.name ?? '';
             const lastExSets = exSets;
             return (
               <article
                 key={exerciseId}
                 id={`ex-${exerciseId}`}
-                className="card relative overflow-hidden"
-                style={{ boxShadow: `inset 3px 0 0 ${catColor}` }}
+                className="card overflow-hidden"
               >
-                <header
-                  className="flex items-center justify-between gap-2 px-4 py-3"
-                  style={{ background: `linear-gradient(90deg, color-mix(in srgb, ${catColor} 10%, transparent), transparent 60%)` }}
-                >
-                  <a href={`/exercise?id=${exerciseId}`} className="flex min-w-0 flex-1 items-center gap-2 font-semibold tracking-tight hover:underline">
-                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: catColor, boxShadow: `0 0 6px ${catColor}` }} />
-                    <span className="truncate">{ex?.name ?? `#${exerciseId}`}</span>
-                  </a>
-                  <span className="hidden shrink-0 text-xs tabular-nums text-muted sm:inline">
-                    {exSets.length === 0
-                      ? t('workout.noSetsYet')
-                      : `${exSets.length} ${exSets.length === 1 ? t('workout.serie') : t('workout.series')}${cardio
-                          ? `${totalDuration ? ` · ${formatDuration(totalDuration)}` : ''}${totalDistance > 0 ? ` · ${formatDistance(totalDistance)}` : ''}`
-                          : ` · ${Math.round(totalVol).toLocaleString(locale)} kg`}`}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => removeExerciseFromDay(exerciseId, exSets)}
-                    aria-label={t('workout.removeExercise')}
-                    title={t('workout.removeExercise')}
-                    className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-muted transition hover:bg-elevated hover:text-red-400"
-                  >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M3 6h18" /><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                    </svg>
-                  </button>
+                <header className="flex items-start justify-between gap-3 border-b border-border/50 px-4 py-3">
+                  <div className="min-w-0 flex-1">
+                    {catName ? (
+                      <div
+                        className="mb-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted"
+                        style={{ color: `color-mix(in srgb, ${catColor} 70%, var(--color-muted))` }}
+                      >
+                        {catName}
+                      </div>
+                    ) : null}
+                    <a
+                      href={`/exercise?id=${exerciseId}`}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        window.location.assign(`/exercise?id=${exerciseId}`);
+                      }}
+                      className="block truncate text-[15px] font-semibold leading-snug tracking-tight hover:underline"
+                    >
+                      {ex?.name ?? `#${exerciseId}`}
+                    </a>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1">
+                    {exSets.length > 0 && (
+                      <span className="rounded-md bg-elevated px-2 py-0.5 text-[11px] font-medium tabular-nums text-muted">
+                        {exSets.length} {exSets.length === 1 ? t('workout.serie') : t('workout.series')}
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => removeExerciseFromDay(exerciseId, exSets.length > 0)}
+                      className="grid h-8 w-8 place-items-center rounded-md text-muted transition hover:bg-danger/10 hover:text-danger"
+                      aria-label={t('workout.removeFromDay')}
+                      title={t('workout.removeFromDay')}
+                    >
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M3 6h18" /><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6" /><path d="M14 11v6" /></svg>
+                    </button>
+                  </div>
                 </header>
 
                 {exSets.length > 0 && (
-                  <>
-                    <div className="flex items-center justify-between border-t border-border/60 bg-elevated/30 px-4 py-1.5 text-[11px] tabular-nums text-muted sm:hidden">
-                      <span>{exSets.length} {exSets.length === 1 ? t('workout.serie') : t('workout.series')}</span>
-                      <span>
-                        {cardio
-                          ? `${formatDuration(totalDuration)}${totalDistance > 0 ? ` · ${formatDistance(totalDistance)}` : ''}`
-                          : `${Math.round(totalVol).toLocaleString(locale)} kg`}
-                      </span>
-                    </div>
-
-                    <div className="no-scrollbar flex gap-2 overflow-x-auto px-4 py-3">
+                  <ol className="flex flex-col divide-y divide-border/60 border-t border-border/60">
                       {exSets.map((s, i) => (
-                        <SetChip
+                        <SetRow
                           key={s.id}
                           set={s}
                           index={i}
                           cardio={cardio}
-                          active={editingSetId === s.id}
-                          onClick={() => setEditingSetId((cur) => (cur === s.id ? null : s.id))}
+                          editing={editingSetId === s.id}
+                          onStartEdit={() => setEditingSetId(s.id)}
+                          onCancelEdit={() => setEditingSetId(null)}
+                          onSave={async (patch) => {
+                            await updateSet(s.id, patch);
+                            setEditingSetId(null);
+                          }}
+                          onDelete={() => {
+                            if (window.confirm(t('workout.confirmDeleteSet'))) deleteSet(s.id);
+                          }}
+                          onDuplicate={() => duplicateSet(s.id)}
                         />
                       ))}
-                    </div>
-
-                    {/* grid-template-rows 0fr→1fr gives the edit form a smooth
-                        height transition instead of popping in/out (skipped
-                        entirely under prefers-reduced-motion via .rowgrid). */}
-                    <div className={`rowgrid grid ${editingSetId != null && exSets.some((s) => s.id === editingSetId) ? 'rowgrid-open' : ''}`}>
-                      <div className="min-h-0 overflow-hidden">
-                        {editingSetId != null && exSets.some((s) => s.id === editingSetId) && (
-                          <div className="border-t border-border/60 bg-elevated/40 px-4 py-2.5">
-                            {(() => {
-                              const s = exSets.find((x) => x.id === editingSetId)!;
-                              return cardio ? (
-                                <EditCardioForm
-                                  initialDuration={s.duration_seconds}
-                                  initialDistance={s.distance_m}
-                                  onCancel={() => setEditingSetId(null)}
-                                  onSave={async (dur, dist) => {
-                                    await updateSet(s.id, { duration_seconds: dur, distance_m: dist });
-                                    setEditingSetId(null);
-                                  }}
-                                  onDuplicate={() => duplicateSet(s.id)}
-                                  onDelete={async () => {
-                                    const ok = await confirm({ body: t('workout.confirmDeleteSet'), confirmLabel: t('action.delete'), destructive: true });
-                                    if (ok) { deleteSet(s.id); setEditingSetId(null); }
-                                  }}
-                                />
-                              ) : (
-                                <EditWeightForm
-                                  initialWeight={s.weight_kg}
-                                  initialReps={s.reps}
-                                  onCancel={() => setEditingSetId(null)}
-                                  onSave={async (w, r) => {
-                                    await updateSet(s.id, { weight_kg: w, reps: r });
-                                    setEditingSetId(null);
-                                  }}
-                                  onDuplicate={() => duplicateSet(s.id)}
-                                  onDelete={async () => {
-                                    const ok = await confirm({ body: t('workout.confirmDeleteSet'), confirmLabel: t('action.delete'), destructive: true });
-                                    if (ok) { deleteSet(s.id); setEditingSetId(null); }
-                                  }}
-                                />
-                              );
-                            })()}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </>
+                  </ol>
                 )}
 
                 {openAdderId === exerciseId ? (
@@ -464,6 +351,16 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
                     ) : (
                       <QuickAdd exerciseId={exerciseId} onAdd={addSet} lastSets={lastExSets} />
                     )}
+                    {exSets.length === 0 && (
+                      <button
+                        type="button"
+                        onClick={() => removeExerciseFromDay(exerciseId, false)}
+                        className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-danger/40 bg-danger/10 py-2.5 text-sm font-medium text-danger transition hover:bg-danger/20"
+                      >
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M3 6h18" /><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6" /><path d="M14 11v6" /></svg>
+                        {t('workout.removeFromDay')}
+                      </button>
+                    )}
                   </div>
                 ) : (
                   <button
@@ -481,7 +378,8 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
         </div>
       )}
 
-      {/* Notes */}
+      {/* Notes — only when there is something logged */}
+      {allCards.length > 0 && (
       <section className="card p-4">
         <div className="section-title mb-2">{t('workout.notes')}</div>
         <textarea
@@ -495,6 +393,7 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
           className="w-full resize-none rounded-lg border border-border bg-elevated px-3 py-2 text-sm outline-none transition focus:border-accent/60"
         />
       </section>
+      )}
 
       {pickerOpen && (
         <ExercisePicker
@@ -505,31 +404,7 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
           onCreate={createExercise}
         />
       )}
-
-      <RestTimer triggerTick={setTick} />
     </div>
-  );
-}
-
-/** Build & queue the "new record" celebratory toast — pr-shine sweep plus a
- *  12-piece CSS confetti burst (both skipped automatically under
- *  prefers-reduced-motion via the .pr-shine/.pr-confetti CSS rules). */
-function announcePr(
-  exerciseName: string,
-  weight: number,
-  reps: number,
-  t: (key: string, vars?: Record<string, string | number>) => string,
-) {
-  toast.custom(
-    <div className="pr-shine pr-confetti relative flex items-center gap-2 overflow-visible">
-      {Array.from({ length: 12 }).map((_, i) => (
-        <span key={i} className="confetti-piece" aria-hidden="true" />
-      ))}
-      <span className="relative z-10 font-semibold text-fg">
-        {t('toast.newRecord')} · {exerciseName} · {formatKg(weight)} kg × {reps}
-      </span>
-    </div>,
-    { duration: 2500 },
   );
 }
 
@@ -625,7 +500,7 @@ function QuickAdd({
         onMouseDown={(e) => e.preventDefault()}
         className="btn-accent grid h-[52px] w-[52px] shrink-0 place-items-center rounded-xl active:scale-95 disabled:opacity-40"
         disabled={!draft.weight || !draft.reps}
-        aria-label={justAdded ? tLocal('workout.added') : tLocal('workout.addSetAria')}
+        aria-label={justAdded ? 'Añadido' : 'Añadir set'}
       >
         {justAdded ? (
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
@@ -719,6 +594,24 @@ function ExercisePicker({
   const [query, setQuery] = useState('');
   const [stepCategory, setStepCategory] = useState<number | null>(null); // null = group index
   const [creatorOpen, setCreatorOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (creatorOpen) { setCreatorOpen(false); return; }
+      if (stepCategory !== null) { setStepCategory(null); return; }
+      if (query) { setQuery(''); return; }
+      onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.body.style.overflow = '';
+    };
+  }, [onClose, creatorOpen, stepCategory, query]);
 
   const q = query.trim().toLowerCase();
   const isSearching = q.length > 0;
@@ -759,26 +652,31 @@ function ExercisePicker({
   const activeCategory = stepCategory != null ? categories.find((c) => c.id === stepCategory) ?? null : null;
   const showGroupsIndex = !isSearching && stepCategory === null;
 
-  return (
-    <BottomSheet open onClose={onClose} className="h-[88dvh] lg:h-[85vh] lg:max-w-lg">
-      <div className="mx-auto flex h-full w-full max-w-3xl flex-col px-4 pt-1 pb-2">
-        {/* Top bar: back button (if inside group or searching) + search input + close */}
-        <div className="flex items-center gap-2">
+  if (!mounted) return null;
+
+  const overlay = (
+    <div className="fixed inset-0 z-[80] flex flex-col bg-bg">
+      {/* Own top bar — portaled to body so it never sits under the app header. */}
+      <div
+        className="glass-bar shrink-0 border-b border-border/60"
+        style={{ paddingTop: 'max(0.75rem, env(safe-area-inset-top))' }}
+      >
+        <div className="mx-auto flex w-full max-w-3xl items-center gap-2 px-4 pb-3 pt-1">
           {stepCategory !== null && (
             <button
               type="button"
               onClick={() => { setStepCategory(null); setQuery(''); }}
               className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-border bg-elevated/60 text-muted transition hover:bg-elevated hover:text-fg"
-              aria-label={t('picker.backToGroups')}
+              aria-label={t('exercises.backGroups')}
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
             </button>
           )}
-          <div className="relative flex-1">
-            <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>
+          <div className="relative min-w-0 flex-1">
+            <svg className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>
             <input
               autoFocus
-              placeholder={activeCategory ? t('picker.searchInGroup', { group: activeCategory.name }) : t('exercises.searchPlaceholder')}
+              placeholder={activeCategory ? t('exercises.searchInGroup', { name: activeCategory.name }) : t('exercises.searchPlaceholder')}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               className="w-full rounded-xl border border-border bg-elevated pl-9 pr-3 py-2.5 outline-none transition focus:border-accent/60"
@@ -787,20 +685,21 @@ function ExercisePicker({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg px-3 py-2 text-sm text-muted transition hover:bg-card hover:text-fg"
+            className="shrink-0 rounded-lg px-3 py-2 text-sm font-medium text-muted transition hover:bg-elevated hover:text-fg"
           >
             {t('action.close')}
           </button>
         </div>
+      </div>
 
-        {/* Step header when inside a group */}
+      <div
+        className="mx-auto flex w-full max-w-3xl min-h-0 flex-1 flex-col px-4 pt-3"
+        style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
+      >
         {activeCategory && !isSearching && (
-          <div className="mt-3 flex items-center gap-2">
-            <span className="h-2.5 w-2.5 rounded-full" style={{ background: activeCategory.color ?? '#888' }} />
+          <div className="mb-1 flex items-baseline gap-2">
             <h2 className="text-lg font-semibold tracking-tight">{activeCategory.name}</h2>
-            <span className="text-xs text-muted">
-              · {(() => { const n = countByCat.get(activeCategory.id) ?? 0; return n === 1 ? t('exercises.countSingular', { n }) : t('exercises.countPlural', { n }); })()}
-            </span>
+            <span className="text-xs text-muted">{t('exercises.count', { n: countByCat.get(activeCategory.id) ?? 0 })}</span>
           </div>
         )}
 
@@ -823,7 +722,7 @@ function ExercisePicker({
         {/* Body: groups index OR exercise list */}
         {showGroupsIndex ? (
           <div className="mt-3 flex-1 overflow-y-auto">
-            <div className="mb-2 text-xs text-muted">{t('picker.chooseGroup')}</div>
+            <div className="mb-2 text-xs text-muted">{t('exercises.pickGroupShort')}</div>
             <div className="grid grid-cols-2 gap-2">
               {categories.map((c) => {
                 const n = countByCat.get(c.id) ?? 0;
@@ -834,14 +733,12 @@ function ExercisePicker({
                     type="button"
                     onClick={() => setStepCategory(c.id)}
                     className="group flex items-center justify-between gap-2 rounded-xl border border-border bg-card p-3 text-left transition hover:border-strong hover:bg-elevated"
+                    style={{ background: `color-mix(in srgb, ${c.color ?? '#888'} 8%, var(--color-card))` }}
                   >
                     <div className="flex min-w-0 flex-col">
-                      <span className="flex items-center gap-2">
-                        <span className="h-2 w-2 rounded-full" style={{ background: c.color ?? '#888', boxShadow: `0 0 8px ${c.color}55` }} />
-                        <span className="truncate font-semibold">{c.name}</span>
-                      </span>
+                      <span className="truncate font-semibold">{c.name}</span>
                       <span className="mt-0.5 text-[11px] text-muted">
-                        {t('picker.exerciseCountAbbrev', { n })}{last ? ` · ${relativeDate(last, t)}` : ''}
+                        {n} ejerc{last ? ` · ${relativeDate(last)}` : ''}
                       </span>
                     </div>
                     <svg className="shrink-0 text-muted transition group-hover:text-fg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
@@ -859,23 +756,29 @@ function ExercisePicker({
                   onClick={() => onSelect(e.id)}
                   className="flex w-full items-center justify-between px-4 py-3 text-left transition hover:bg-elevated"
                 >
-                  <span className="flex min-w-0 items-center gap-2.5">
-                    <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: e.category_color ?? '#888' }} />
-                    <span className="truncate">{e.name}</span>
+                  <span className="flex min-w-0 flex-col truncate">
+                    <span className="truncate font-medium">{e.name}</span>
+                    {e.category_name ? (
+                      <span className="truncate text-[10px] uppercase tracking-wider text-muted">{e.category_name}</span>
+                    ) : null}
                   </span>
-                  {e.last_used && <span className="shrink-0 text-xs text-muted">{relativeDate(e.last_used, t)}</span>}
+                  {e.last_used && <span className="shrink-0 text-xs text-muted">{relativeDate(e.last_used)}</span>}
                 </button>
               </li>
             ))}
             {visibleExercises.length === 0 && (
               <li className="flex flex-col items-center justify-center gap-3 py-10 text-center text-sm text-muted">
-                <span>{isSearching ? t('picker.noResultsFor', { q: query }) : t('picker.groupEmpty')}</span>
+                <EmptyState
+                  variant={isSearching ? 'search' : 'exercises'}
+                  title={isSearching ? undefined : t('exercises.emptyGroup')}
+                  body={isSearching ? t('exercises.noResults', { query }) : undefined}
+                />
                 <button
                   type="button"
                   onClick={() => setCreatorOpen(true)}
                   className="btn-accent rounded-full px-4 py-2 text-xs"
                 >
-                  {isSearching && query.trim() ? t('picker.createQuoted', { name: query.trim() }) : t('picker.createGeneric')}
+                  + Crear {isSearching && query.trim() ? `"${query.trim()}"` : 'nuevo ejercicio'}
                 </button>
               </li>
             )}
@@ -885,9 +788,7 @@ function ExercisePicker({
         {!creatorOpen && !showGroupsIndex && (
           <div className="mt-2 flex shrink-0 items-center justify-between">
             <span className="text-[11px] text-muted">
-              {visibleExercises.length === 1
-                ? t('picker.resultCountSingular', { n: visibleExercises.length })
-                : t('picker.resultCountPlural', { n: visibleExercises.length })}
+              {visibleExercises.length} resultado{visibleExercises.length === 1 ? '' : 's'}
             </span>
             <button
               type="button"
@@ -895,62 +796,122 @@ function ExercisePicker({
               className="inline-flex items-center gap-1.5 rounded-full border border-border bg-elevated/60 px-3 py-1.5 text-xs font-medium text-fg transition hover:border-strong hover:bg-elevated"
             >
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M12 5v14" /><path d="M5 12h14" /></svg>
-              {t('exercise.createBtn')}
+              Crear ejercicio
             </button>
           </div>
         )}
       </div>
-    </BottomSheet>
+    </div>
   );
+
+  return createPortal(overlay, document.body);
 }
 
-/** Horizontal, scrollable chip for one logged set ("80 kg × 8"). Tapping it
- *  toggles inline editing (rendered by the parent, below the chip strip).
- *  A PR badge floats above the chip when this set unlocked a record. */
-function SetChip({
+function SetRow({
   set,
   index,
   cardio,
-  active,
-  onClick,
+  editing,
+  onStartEdit,
+  onCancelEdit,
+  onSave,
+  onDelete,
+  onDuplicate,
 }: {
   set: TrainingSet;
   index: number;
   cardio: boolean;
-  active: boolean;
-  onClick: () => void;
+  editing: boolean;
+  onStartEdit: () => void;
+  onCancelEdit: () => void;
+  onSave: (patch: Partial<Pick<TrainingSet, 'weight_kg' | 'reps' | 'duration_seconds' | 'distance_m'>>) => void | Promise<void>;
+  onDelete: () => void;
+  onDuplicate: () => void;
 }) {
   const { t } = useT();
+
+  if (editing) {
+    return (
+      <li className="bg-elevated/40 px-4 py-2.5">
+        {cardio ? (
+          <EditCardioForm
+            initialDuration={set.duration_seconds}
+            initialDistance={set.distance_m}
+            onCancel={onCancelEdit}
+            onSave={(dur, dist) => onSave({ duration_seconds: dur, distance_m: dist })}
+            onDuplicate={onDuplicate}
+          />
+        ) : (
+          <EditWeightForm
+            initialWeight={set.weight_kg}
+            initialReps={set.reps}
+            onCancel={onCancelEdit}
+            onSave={(w, r) => onSave({ weight_kg: w, reps: r })}
+            onDuplicate={onDuplicate}
+          />
+        )}
+      </li>
+    );
+  }
+
   const isOptimistic = set.id < 0;
-  const hasPr = !cardio && (set.pr_weight || set.pr_reps);
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={`${t('workout.editSet')} ${index + 1}`}
-      className={`row-in relative flex shrink-0 items-center gap-1.5 rounded-xl border px-3 py-2 text-sm tabular-nums transition active:scale-[0.97] ${
-        active
-          ? 'border-accent bg-accent-soft text-fg'
-          : 'border-border bg-elevated/60 text-fg hover:border-strong'
-      } ${isOptimistic ? 'opacity-80' : ''}`}
+    <li
+      className={`row-in group flex items-center justify-between gap-3 px-4 py-2.5 text-sm transition hover:bg-elevated/40 ${isOptimistic ? 'opacity-80' : ''}`}
     >
-      {hasPr && (
-        <span className="pr-pop absolute -right-1.5 -top-1.5 grid h-4 w-4 place-items-center rounded-full bg-accent text-ink" title={t('pr.weightUnlocked')}>
-          <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor"><path d="M7.5 2h9l1.5 3h3.5l-2.5 5a6 6 0 0 1-4.4 3.85L14 18h2v2H8v-2h2l-.6-4.15A6 6 0 0 1 5 10L2.5 5H6z"/></svg>
+      <button
+        type="button"
+        onClick={onStartEdit}
+        className="flex min-w-0 flex-1 items-center gap-3 text-left"
+      >
+        <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-elevated text-[11px] font-semibold text-muted tabular-nums">
+          {index + 1}
         </span>
-      )}
-      <span className="text-[10px] font-semibold text-muted">{index + 1}</span>
-      {cardio ? (
-        <span className="font-semibold">
-          {formatDuration(set.duration_seconds)}
-          {set.distance_m > 0 ? ` · ${formatDistance(set.distance_m)}` : ''}
-        </span>
-      ) : (
-        <span className="font-semibold">
-          {formatKg(set.weight_kg)} <span className="text-[11px] font-normal text-muted">kg</span> × {set.reps}
-        </span>
-      )}
-    </button>
+        {cardio ? (
+          <span className="flex items-baseline tabular-nums">
+            <span className="w-16 text-right text-lg font-semibold">{formatDuration(set.duration_seconds)}</span>
+            {set.distance_m > 0 ? (
+              <>
+                <span className="mx-2 text-muted">·</span>
+                <span className="text-right text-lg font-semibold">{formatDistance(set.distance_m)}</span>
+              </>
+            ) : null}
+          </span>
+        ) : (
+          <span className="flex items-baseline tabular-nums">
+            <span className="w-14 text-right text-lg font-semibold">{formatKg(set.weight_kg)}</span>
+            <span className="ml-1 w-7 text-left text-[10px] uppercase tracking-wider text-muted">kg</span>
+            <span className="mx-1 text-muted">·</span>
+            <span className="w-8 text-right text-lg font-semibold">{set.reps}</span>
+            <span className="ml-1 text-[10px] uppercase tracking-wider text-muted">reps</span>
+          </span>
+        )}
+        {!cardio && <PrBadges set={set} />}
+      </button>
+      <div className="flex shrink-0 items-center gap-1">
+        <button
+          type="button"
+          onClick={onStartEdit}
+          className="grid h-8 w-8 place-items-center rounded-md text-muted opacity-100 transition hover:bg-card hover:text-fg sm:opacity-0 sm:group-hover:opacity-100"
+          aria-label={t('action.edit')}
+          title={t('action.edit')}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          onClick={onDelete}
+          className="grid h-8 w-8 place-items-center rounded-md text-muted opacity-100 transition hover:bg-danger/10 hover:text-danger sm:opacity-0 sm:group-hover:opacity-100"
+          aria-label={t('action.delete')}
+          title={t('action.delete')}
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
+        </button>
+      </div>
+    </li>
   );
 }
 
@@ -960,14 +921,12 @@ function EditWeightForm({
   onCancel,
   onSave,
   onDuplicate,
-  onDelete,
 }: {
   initialWeight: number;
   initialReps: number;
   onCancel: () => void;
   onSave: (weight: number, reps: number) => void | Promise<void>;
   onDuplicate?: () => void;
-  onDelete?: () => void;
 }) {
   const { t } = useT();
   const [w, setW] = useState(String(initialWeight));
@@ -1005,31 +964,19 @@ function EditWeightForm({
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
         </button>
       </div>
-      <div className="flex items-center gap-1.5">
-        {onDuplicate && (
-          <button
-            type="button"
-            onClick={onDuplicate}
-            className="inline-flex items-center justify-center gap-1.5 rounded-md border border-border bg-elevated/50 px-2.5 py-1 text-[11px] font-medium text-muted transition hover:bg-elevated hover:text-fg"
-          >
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-            </svg>
-            {t('action.duplicate')}
-          </button>
-        )}
-        {onDelete && (
-          <button
-            type="button"
-            onClick={onDelete}
-            className="inline-flex items-center justify-center gap-1.5 rounded-md border border-border bg-elevated/50 px-2.5 py-1 text-[11px] font-medium text-danger transition hover:bg-danger/10"
-          >
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
-            {t('action.delete')}
-          </button>
-        )}
-      </div>
+      {onDuplicate && (
+        <button
+          type="button"
+          onClick={onDuplicate}
+          className="inline-flex items-center justify-center gap-1.5 self-start rounded-md border border-border bg-elevated/50 px-2.5 py-1 text-[11px] font-medium text-muted transition hover:bg-elevated hover:text-fg"
+        >
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+          </svg>
+          {t('action.duplicate')}
+        </button>
+      )}
     </form>
   );
 }
@@ -1040,14 +987,12 @@ function EditCardioForm({
   onCancel,
   onSave,
   onDuplicate,
-  onDelete,
 }: {
   initialDuration: number;
   initialDistance: number;
   onCancel: () => void;
   onSave: (durationSec: number, distanceM: number) => void | Promise<void>;
   onDuplicate?: () => void;
-  onDelete?: () => void;
 }) {
   const { t } = useT();
   const [d, setD] = useState(initialDuration ? formatDuration(initialDuration) : '');
@@ -1086,31 +1031,19 @@ function EditCardioForm({
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
         </button>
       </div>
-      <div className="flex items-center gap-1.5">
-        {onDuplicate && (
-          <button
-            type="button"
-            onClick={onDuplicate}
-            className="inline-flex items-center justify-center gap-1.5 rounded-md border border-border bg-elevated/50 px-2.5 py-1 text-[11px] font-medium text-muted transition hover:bg-elevated hover:text-fg"
-          >
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-            </svg>
-            {t('action.duplicate')}
-          </button>
-        )}
-        {onDelete && (
-          <button
-            type="button"
-            onClick={onDelete}
-            className="inline-flex items-center justify-center gap-1.5 rounded-md border border-border bg-elevated/50 px-2.5 py-1 text-[11px] font-medium text-danger transition hover:bg-danger/10"
-          >
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
-            {t('action.delete')}
-          </button>
-        )}
-      </div>
+      {onDuplicate && (
+        <button
+          type="button"
+          onClick={onDuplicate}
+          className="inline-flex items-center justify-center gap-1.5 self-start rounded-md border border-border bg-elevated/50 px-2.5 py-1 text-[11px] font-medium text-muted transition hover:bg-elevated hover:text-fg"
+        >
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+          </svg>
+          {t('action.duplicate')}
+        </button>
+      )}
     </form>
   );
 }
@@ -1186,7 +1119,7 @@ function QuickAddCardio({
         onMouseDown={(e) => e.preventDefault()}
         className="btn-accent grid h-[52px] w-[52px] shrink-0 place-items-center rounded-xl active:scale-95 disabled:opacity-40"
         disabled={!duration.trim()}
-        aria-label={justAdded ? tLocal('workout.added') : tLocal('workout.addSetAria')}
+        aria-label={justAdded ? 'Añadido' : 'Añadir serie'}
       >
         {justAdded ? (
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
@@ -1213,7 +1146,7 @@ function CreateExerciseForm({
   onCancel: () => void;
   onCreate: (name: string, categoryId: number) => Promise<void> | void;
 }) {
-  const { t } = useT();
+  const { t } = useLocale();
   const [name, setName] = useState(initialName);
   const [categoryId, setCategoryId] = useState<number | null>(initialCategoryId);
   const [submitting, setSubmitting] = useState(false);
@@ -1229,7 +1162,7 @@ function CreateExerciseForm({
   return (
     <form onSubmit={submit} className="mt-3 rounded-xl border border-accent/40 bg-card p-3">
       <div className="mb-2 flex items-center justify-between">
-        <div className="section-title">{t('exercise.new')}</div>
+        <div className="section-title">{t('exercises.newExercise')}</div>
         <button type="button" onClick={onCancel} className="text-xs text-muted hover:text-fg">
           {t('action.cancel')}
         </button>
@@ -1238,7 +1171,7 @@ function CreateExerciseForm({
         autoFocus
         value={name}
         onChange={(e) => setName(e.target.value)}
-        placeholder={t('exercise.namePlaceholder')}
+        placeholder={t('exercises.createPlaceholder')}
         className="w-full rounded-lg border border-border bg-elevated px-3 py-2 text-sm outline-none transition focus:border-accent/60"
       />
       <div className="no-scrollbar -mx-1 mt-2 flex gap-1.5 overflow-x-auto px-1">
@@ -1266,24 +1199,23 @@ function CreateExerciseForm({
         disabled={!name.trim() || !categoryId || submitting}
         className="btn-accent mt-3 w-full rounded-lg py-2 text-sm disabled:opacity-40"
       >
-        {submitting ? t('exercise.creating') : t('exercise.createAndSelect')}
+        {submitting ? t('action.creating') : t('exercises.createAndSelect')}
       </button>
     </form>
   );
 }
 
 function PrBadges({ set }: { set: TrainingSet }) {
-  const { t } = useT();
+  const { t } = useLocale();
   const badges: Array<{ label: string; title: string; cls: string; icon: React.ReactNode }> = [];
-  // Pesa (dumbbell) — a new max weight was unlocked.
   if (set.pr_weight) badges.push({
-    label: 'W', title: t('pr.weightUnlocked'),
+    label: t('pr.weightLabel'), title: t('pr.weightTitle'),
     cls: 'bg-accent text-ink',
     icon: <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="m6.5 6.5 11 11"/><path d="m21 21-1-1"/><path d="m3 3 1 1"/><path d="m18 22 4-4"/><path d="m2 6 4-4"/><path d="m3 10 7-7"/><path d="m14 21 7-7"/></svg>,
   });
   // Copa (trophy) — more reps than ever at this weight or heavier.
   if (set.pr_reps) badges.push({
-    label: 'R', title: t('pr.repsRecord'),
+    label: t('pr.repsLabel'), title: t('pr.repsTitle'),
     cls: 'bg-accent text-ink',
     icon: <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M7.5 2h9l1.5 3h3.5l-2.5 5a6 6 0 0 1-4.4 3.85L14 18h2v2H8v-2h2l-.6-4.15A6 6 0 0 1 5 10L2.5 5H6z"/></svg>,
   });
@@ -1344,12 +1276,12 @@ function formatDistance(meters: number): string {
   return `${Math.round(meters)} m`;
 }
 
-function relativeDate(iso: string, t: (key: string, vars?: Record<string, string | number>) => string) {
+function relativeDate(iso: string) {
   const diffDays = Math.round((Date.now() - new Date(iso).getTime()) / 86_400_000);
-  if (diffDays === 0) return t('rel.today');
-  if (diffDays === 1) return t('rel.yesterday');
-  if (diffDays < 7) return t('rel.daysAgo', { n: diffDays });
-  if (diffDays < 30) return t('rel.weeksAgo', { n: Math.floor(diffDays / 7) });
-  if (diffDays < 365) return t('rel.monthsAgo', { n: Math.floor(diffDays / 30) });
-  return t('rel.yearsAgo', { n: Math.floor(diffDays / 365) });
+  if (diffDays === 0) return 'hoy';
+  if (diffDays === 1) return 'ayer';
+  if (diffDays < 7) return `hace ${diffDays}d`;
+  if (diffDays < 30) return `hace ${Math.floor(diffDays / 7)}sem`;
+  if (diffDays < 365) return `hace ${Math.floor(diffDays / 30)}m`;
+  return `hace ${Math.floor(diffDays / 365)}a`;
 }

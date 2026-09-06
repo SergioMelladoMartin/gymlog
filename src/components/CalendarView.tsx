@@ -1,16 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useDatabase } from '../hooks/useDatabase';
+import { useLocale } from '../hooks/useLocale';
 import { getDayPrCounts, getTrainingDaysInRange, todayISO } from '../lib/queries';
-import { useT } from '../hooks/useT';
-import { getLocale } from '../lib/i18n';
-import { CalendarSkeleton } from './ui/Skeleton';
+import { CalendarSkeleton } from './Skeleton';
 
 type View = 'month' | 'year';
 
 export default function CalendarView() {
-  const { t, lang } = useT();
-  const locale = getLocale(lang);
-  const ready = useDatabase();
+  const { ready, revision } = useDatabase();
+  const { t, fmt, fmtDate, weekdaysShort } = useLocale();
   const now = new Date();
   const url = typeof window !== 'undefined' ? new URL(window.location.href) : null;
   const view = (url?.searchParams.get('view') ?? 'month') as View;
@@ -31,7 +29,7 @@ export default function CalendarView() {
     const d = getTrainingDaysInRange(rangeFrom, rangeTo);
     setDays(d);
     setPrs(getDayPrCounts(d.map((x) => x.date)));
-  }, [ready, rangeFrom, rangeTo]);
+  }, [ready, revision, rangeFrom, rangeTo]);
 
   const byDate = useMemo(() => new Map(days.map((d) => [d.date, d])), [days]);
   const totalDays = days.length;
@@ -40,7 +38,6 @@ export default function CalendarView() {
 
   if (!ready) return <CalendarSkeleton />;
 
-  // Month grid
   const first = new Date(year, month - 1, 1);
   const lastDate = new Date(year, month, 0);
   const firstWeekday = (first.getDay() + 6) % 7;
@@ -51,11 +48,10 @@ export default function CalendarView() {
 
   const prevM = new Date(year, month - 2, 1);
   const nextM = new Date(year, month, 1);
-  const monthName = first.toLocaleDateString(locale, { month: 'long', year: 'numeric' });
-  const weekdayHeaders = t('calendar.weekdaysShort').split(',');
-  const weekLetters = t('calendar.weekLetters').split(',');
+  const monthName = fmtDate(`${year}-${pad(month)}-01`, { month: 'long', year: 'numeric' });
+  const dowShort = weekdaysShort();
+  const dowHeat = [dowShort[0], dowShort[2], dowShort[4], dowShort[6]];
 
-  // Heatmap for year view
   interface HeatCell { iso: string; dow: number; col: number; trained: boolean; sets: number; hasPr: boolean }
   const heatCells: HeatCell[] = [];
   if (view === 'year') {
@@ -86,9 +82,8 @@ export default function CalendarView() {
   const totalCols = heatCells.length ? Math.max(...heatCells.map((c) => c.col)) + 1 : 0;
 
   const monthLabels = view === 'year' ? Array.from({ length: 12 }, (_, i) => {
-    const d = new Date(year, i, 1);
     const col = heatCells.find((c) => c.iso === `${year}-${pad(i + 1)}-01`)?.col ?? 0;
-    return { label: d.toLocaleDateString(locale, { month: 'short' }).replace('.', ''), col };
+    return { label: fmtDate(`${year}-${pad(i + 1)}-01`, { month: 'short' }), col };
   }) : [];
 
   return (
@@ -125,13 +120,13 @@ export default function CalendarView() {
       <div className="mb-5 grid grid-cols-3 gap-2">
         <Stat label={t('calendar.days')} value={String(totalDays)} />
         <Stat label={t('workout.sets')} value={String(totalSets)} />
-        <Stat label={t('stats.metric.volume')} value={`${Math.round(totalVolume / 1000)}k`} />
+        <Stat label={t('calendar.volume')} value={`${Math.round(totalVolume / 1000)}k`} />
       </div>
 
       {view === 'month' ? (
         <>
           <div className="grid grid-cols-7 gap-1.5 text-center text-[11px] font-medium uppercase tracking-wider text-muted">
-            {weekdayHeaders.map((d) => <div key={d} className="py-1">{d}</div>)}
+            {dowShort.map((d) => <div key={d} className="py-1">{d}</div>)}
           </div>
           <div className="mt-1 grid grid-cols-7 gap-1.5">
             {cells.map((cell, i) => {
@@ -182,22 +177,24 @@ export default function CalendarView() {
               </div>
               <div className="flex gap-1">
                 <div className="flex w-5 flex-col justify-between pt-0.5 text-[10px] uppercase text-muted">
-                  {weekLetters.map((l) => <span key={l}>{l}</span>)}
+                  {dowHeat.map((l) => <span key={l}>{l}</span>)}
                 </div>
                 <div className="relative" style={{ width: `${totalCols * 14}px`, height: `${7 * 14}px` }}>
                   {heatCells.map((hc) => {
                     const isToday = hc.iso === today;
-                    // Every trained day is the same solid green — no intensity
-                    // gradient. A record that day gets a yellow dot on top.
                     const bg = hc.trained
                       ? 'var(--color-accent)'
                       : 'color-mix(in srgb, var(--color-border) 40%, transparent)';
-                    const title = hc.trained
-                      ? t('calendar.tooltipTrained', { date: hc.iso, sets: hc.sets }) + (hc.hasPr ? t('calendar.tooltipPr') : '')
-                      : t('calendar.tooltipNone', { date: hc.iso });
+                    const tooltip = hc.trained
+                      ? t('calendar.trainedTooltip', {
+                          date: hc.iso,
+                          sets: hc.sets,
+                          pr: hc.hasPr ? t('calendar.prSuffix') : '',
+                        })
+                      : t('calendar.restTooltip', { date: hc.iso });
                     return (
                       <a key={hc.iso} href={`/day?d=${hc.iso}`}
-                        title={title}
+                        title={tooltip}
                         className={`absolute rounded-sm transition hover:scale-125 ${isToday ? 'ring-1 ring-fg' : ''}`}
                         style={{ left: `${hc.col * 14}px`, top: `${hc.dow * 14}px`, width: '11px', height: '11px', background: bg }}
                       >
@@ -219,8 +216,7 @@ function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="stat-tile">
       <div className="section-title">{label}</div>
-      <div className="mt-0.5 font-display text-2xl font-semibold tabular-nums tracking-tight">{value}</div>
+      <div className="mt-0.5 text-2xl font-semibold tabular-nums tracking-tight">{value}</div>
     </div>
   );
 }
-

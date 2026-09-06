@@ -10,10 +10,9 @@ import {
   type TrainingSetEx,
 } from '../lib/queries';
 import type { Category } from '../lib/types';
+import { useLocale } from '../hooks/useLocale';
 import ExerciseHeaderEditor from './ExerciseHeaderEditor';
-import { useT } from '../hooks/useT';
-import { getLocale } from '../lib/i18n';
-import { ExerciseDetailSkeleton } from './ui/Skeleton';
+import { ChartSkeleton, GenericSkeleton } from './Skeleton';
 
 // recharts is ~250 KB — by far the heaviest dependency in the app. Loading it
 // lazily lets the rest of this screen (header, stat tiles, full set history)
@@ -21,38 +20,74 @@ import { ExerciseDetailSkeleton } from './ui/Skeleton';
 // its place instead of blocking the whole page mount.
 const ExerciseChart = lazy(() => import('./ExerciseChart'));
 
-function formatDate(iso: string, locale: string) {
-  return new Date(iso + 'T00:00:00').toLocaleDateString(locale, {
-    weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
-  });
+function readExerciseId(): number {
+  if (typeof window === 'undefined') return 0;
+  const raw = new URL(window.location.href).searchParams.get('id');
+  const n = Number(raw ?? 0);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+function formatDate(iso: string, fmtDate: (iso: string, o: Intl.DateTimeFormatOptions) => string) {
+  return fmtDate(iso, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 export default function ExerciseDetailView() {
-  const { t, lang } = useT();
-  const locale = getLocale(lang);
-  const ready = useDatabase();
-  const id = typeof window !== 'undefined'
-    ? Number(new URL(window.location.href).searchParams.get('id') ?? 0)
-    : 0;
+  const { ready, revision } = useDatabase();
+  const { t, fmtDate } = useLocale();
+  // SSR + first client paint: window hooks run only in effects below.
+  const [exerciseId, setExerciseId] = useState(0);
+  const [idSynced, setIdSynced] = useState(false);
   const [exercise, setExercise] = useState<ExerciseExtra | null>(null);
   const [sessions, setSessions] = useState<ExerciseSessionStat[]>([]);
   const [history, setHistory] = useState<TrainingSetEx[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [notFound, setNotFound] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+
+  // ClientRouter navigations update the URL without a full reload — read the
+  // id after mount and on every in-app page swap so Hoy → ejercicio works.
+  useEffect(() => {
+    const syncId = () => {
+      setExerciseId(readExerciseId());
+      setIdSynced(true);
+    };
+    syncId();
+    document.addEventListener('astro:page-load', syncId);
+    return () => document.removeEventListener('astro:page-load', syncId);
+  }, []);
 
   useEffect(() => {
-    if (!ready) return;
-    const ex = getExerciseById(id);
-    if (!ex) { setNotFound(true); return; }
-    setExercise(ex);
-    setSessions(getExerciseSessionStats(id));
-    setHistory(getExerciseSetsHistory(id, 200));
-    setCategories(getCategories());
-  }, [ready, id]);
+    if (!ready || !idSynced) return;
+    if (!exerciseId) {
+      setNotFound(true);
+      setLoaded(true);
+      return;
+    }
+    setLoaded(false);
+    setNotFound(false);
+    try {
+      const ex = getExerciseById(exerciseId);
+      if (!ex) {
+        setNotFound(true);
+        setLoaded(true);
+        return;
+      }
+      setExercise(ex);
+      setSessions(getExerciseSessionStats(exerciseId));
+      setHistory(getExerciseSetsHistory(exerciseId, 200));
+      setCategories(getCategories());
+      setLoaded(true);
+    } catch (e) {
+      console.error(e);
+      setLoaded(true);
+    }
+  }, [ready, revision, exerciseId, idSynced]);
 
-  if (!ready) return <ExerciseDetailSkeleton />;
-  if (notFound) { if (typeof window !== 'undefined') window.location.replace('/exercises'); return null; }
-  if (!exercise) return null;
+  if (!ready || !idSynced || !loaded) return <GenericSkeleton />;
+  if (notFound || !exercise) {
+    if (typeof window !== 'undefined') window.location.replace('/exercises');
+    return <GenericSkeleton />;
+  }
 
   const totalSets = history.length;
   const totalSessions = sessions.length;
@@ -92,13 +127,13 @@ export default function ExerciseDetailView() {
       <div className="mb-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
         <Tile label={t('exercise.sessions')} value={String(totalSessions)} />
         <Tile label={t('workout.sets')} value={String(totalSets)} />
-        <Tile label={t('exercise.topWeight')} value={String(heaviest)} unit="kg" sub={bestSet ? `${bestSet.weight_kg} × ${bestSet.reps}` : undefined} />
-        <Tile label={t('exercise.oneRM')} value={String(Math.round(best1RM * 10) / 10)} unit="kg" accent />
+        <Tile label={t('exercise.topWeight')} value={String(heaviest)} unit={t('common.kg')} sub={bestSet ? `${bestSet.weight_kg} × ${bestSet.reps}` : undefined} />
+        <Tile label={t('exercise.est1rm')} value={String(Math.round(best1RM * 10) / 10)} unit={t('common.kg')} accent />
       </div>
 
       <div className="card mb-5 p-4">
         <div className="section-title mb-3">{t('exercise.progression')}</div>
-        <Suspense fallback={<div className="grid h-[220px] place-items-center"><div className="h-7 w-7 animate-spin rounded-full border-2 border-border border-t-accent" /></div>}>
+        <Suspense fallback={<ChartSkeleton />}>
           <ExerciseChart data={sessions} />
         </Suspense>
       </div>
@@ -116,7 +151,7 @@ export default function ExerciseDetailView() {
             }
             return (
               <a key={date} href={`/day?d=${date}`} className="-mx-2 flex items-baseline justify-between gap-3 rounded-md px-2 py-2.5 text-sm transition hover:bg-elevated">
-                <span className="shrink-0 capitalize text-muted">{formatDate(date, locale)}</span>
+                <span className="shrink-0 capitalize text-muted">{formatDate(date, fmtDate)}</span>
                 <span className="text-right tabular-nums">
                   {sets.map((s, i) => (
                     <span key={s.id}>

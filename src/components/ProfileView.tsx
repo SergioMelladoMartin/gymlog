@@ -3,9 +3,8 @@ import { getCurrentUser, type UserProfile } from '../lib/auth';
 import { getDb } from '../lib/sqlite';
 import { getWeeklyStreak } from '../lib/queries';
 import { useDatabase } from '../hooks/useDatabase';
-import { useT } from '../hooks/useT';
-import { getLocale } from '../lib/i18n';
-import { ProfileSkeleton } from './ui/Skeleton';
+import { useLocale } from '../hooks/useLocale';
+import { ProfileSkeleton } from './Skeleton';
 
 interface Stats {
   totalSets: number;
@@ -17,8 +16,8 @@ interface Stats {
 }
 
 export default function ProfileView() {
-  const { t, lang } = useT();
-  const ready = useDatabase();
+  const { t, fmt, fmtDate } = useLocale();
+  const { ready, revision } = useDatabase();
   const [user, setUser] = useState<UserProfile | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
   const [streak, setStreak] = useState<number>(0);
@@ -47,14 +46,12 @@ export default function ProfileView() {
       lastDay: row?.last_day ?? null,
     });
     setStreak(getWeeklyStreak());
-  }, [ready]);
+  }, [ready, revision]);
 
   if (!ready) return <ProfileSkeleton />;
 
-  const locale = getLocale(lang);
-  const fmt = (n: number) => Math.round(n).toLocaleString(locale);
   const prettyDate = (iso: string | null) =>
-    iso ? new Date(iso + 'T00:00:00').toLocaleDateString(locale, { day: 'numeric', month: 'long', year: 'numeric' }) : '—';
+    iso ? fmtDate(iso, { day: 'numeric', month: 'long', year: 'numeric' }) : '—';
 
   return (
     <>
@@ -81,7 +78,7 @@ export default function ProfileView() {
         )}
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <div className="truncate text-xl font-semibold tracking-tight">{user?.name ?? t('login.usernameFallback')}</div>
+            <div className="truncate text-xl font-semibold tracking-tight">{user?.name ?? t('common.user')}</div>
             {streak > 0 && (
               <span
                 title={t('profile.streak')}
@@ -101,7 +98,7 @@ export default function ProfileView() {
           <Tile label={t('profile.days')} value={String(stats.totalDays)} />
           <Tile label={t('profile.sets')} value={fmt(stats.totalSets)} />
           <Tile label={t('profile.exercises')} value={String(stats.totalExercises)} />
-          <Tile label={t('profile.volume')} value={`${Math.round(stats.totalVolume / 1000)}k`} unit="kg" />
+          <Tile label={t('profile.volume')} value={`${Math.round(stats.totalVolume / 1000)}k`} unit={t('common.kg')} />
         </section>
       )}
 
@@ -138,7 +135,7 @@ function Tile({ label, value, unit }: { label: string; value: string; unit?: str
   return (
     <div className="stat-tile">
       <div className="section-title">{label}</div>
-      <div className="mt-0.5 font-display text-2xl font-semibold tabular-nums tracking-tight">
+      <div className="mt-0.5 text-2xl font-semibold tabular-nums tracking-tight">
         {value}{unit && <span className="ml-1 text-sm font-medium text-muted">{unit}</span>}
       </div>
     </div>

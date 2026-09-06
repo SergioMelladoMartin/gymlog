@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { Category } from '../lib/types';
 import type { ExerciseExtra as Exercise } from '../lib/queries';
-import { useT } from '../hooks/useT';
+import { useLocale } from '../hooks/useLocale';
 import EmptyState from './EmptyState';
 
 interface Props {
@@ -12,7 +12,7 @@ interface Props {
 }
 
 export default function ExerciseList({ exercises, categories, initialCategory = null, initialQuery = '' }: Props) {
-  const { t } = useT();
+  const { t } = useLocale();
   const [query, setQuery] = useState(initialQuery);
   const [catFilter, setCatFilter] = useState<number | null>(initialCategory);
 
@@ -60,7 +60,7 @@ export default function ExerciseList({ exercises, categories, initialCategory = 
               type="button"
               onClick={() => setQuery('')}
               className="absolute right-2 top-1/2 -translate-y-1/2 grid h-6 w-6 place-items-center rounded-md text-muted transition hover:bg-elevated hover:text-fg"
-              aria-label={t('exercises.clear')}
+              aria-label={t('action.clear')}
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
             </button>
@@ -75,7 +75,7 @@ export default function ExerciseList({ exercises, categories, initialCategory = 
               catFilter === null ? 'btn-accent' : 'bg-elevated/60 text-muted hover:bg-elevated hover:text-fg'
             }`}
           >
-            {t('exercises.all')} <span className="ml-1 opacity-70">{exercises.length}</span>
+            Todos <span className="ml-1 opacity-70">{exercises.length}</span>
           </button>
           {categories.map((c) => {
             const active = catFilter === c.id;
@@ -100,11 +100,11 @@ export default function ExerciseList({ exercises, categories, initialCategory = 
       </div>
 
       <div className="mt-3 mb-3 flex items-center justify-between text-xs text-muted">
-        <span>{totalCount === 1 ? t('exercises.countSingular', { n: totalCount }) : t('exercises.countPlural', { n: totalCount })}</span>
+        <span>{t('exercises.count', { n: totalCount })}</span>
       </div>
 
       {totalCount === 0 ? (
-        <EmptyState variant="search" title={t('exercises.noResults')} />
+        <EmptyState variant="search" />
       ) : (
         <div className="flex flex-col gap-5">
           {grouped.map(({ category, exercises: list }) => (
@@ -119,7 +119,7 @@ export default function ExerciseList({ exercises, categories, initialCategory = 
                   <li key={e.id}>
                     <a href={`/exercise?id=${e.id}`} className="flex items-center justify-between gap-3 px-4 py-3 transition hover:bg-elevated">
                       <span className="min-w-0 truncate">{e.name}</span>
-                      <span className="shrink-0 text-xs text-muted">{formatDate(e.last_used, t)}</span>
+                      <span className="shrink-0 text-xs text-muted">{formatDate(e.last_used)}</span>
                     </a>
                   </li>
                 ))}
@@ -132,12 +132,12 @@ export default function ExerciseList({ exercises, categories, initialCategory = 
   );
 }
 
-function formatDate(iso: string | null, t: (key: string, vars?: Record<string, string | number>) => string) {
+function formatDate(iso: string | null) {
   if (!iso) return '—';
   const diff = Math.round((Date.now() - new Date(iso).getTime()) / 86_400_000);
-  if (diff === 0) return t('rel.today');
-  if (diff === 1) return t('rel.yesterday');
-  if (diff < 30) return t('rel.daysAgo', { n: diff });
-  if (diff < 365) return t('rel.monthsAgo', { n: Math.floor(diff / 30) });
-  return t('rel.yearsAgo', { n: Math.floor(diff / 365) });
+  if (diff === 0) return 'hoy';
+  if (diff === 1) return 'ayer';
+  if (diff < 30) return `hace ${diff}d`;
+  if (diff < 365) return `hace ${Math.floor(diff / 30)}m`;
+  return `hace ${Math.floor(diff / 365)}a`;
 }

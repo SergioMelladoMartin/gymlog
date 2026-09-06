@@ -3,16 +3,15 @@ import { signOut } from '../lib/auth';
 import { exportBytes, importBytes, resetLocal, wipeAll } from '../lib/sqlite';
 import { useT } from '../hooks/useT';
 import { setLang, type Lang } from '../lib/i18n';
-import { useConfirm } from './ui/ConfirmDialog';
-import { toast } from './ui/Toast';
+import { THEMES, themeColor, type ThemeMode } from '../lib/locale';
 
-const ACCENTS: Array<{ key: string; label: string; swatch: string }> = [
-  { key: 'lime',   label: 'Lima',    swatch: '#a3e635' },
-  { key: 'rose',   label: 'Rosa',    swatch: '#f472b6' },
-  { key: 'red',    label: 'Rojo',    swatch: '#f87171' },
-  { key: 'sky',    label: 'Azul',    swatch: '#7dd3fc' },
-  { key: 'violet', label: 'Violeta', swatch: '#c4b5fd' },
-  { key: 'mono',   label: 'Mono',    swatch: '#888888' },
+const ACCENTS: Array<{ key: string; labelKey: string; swatch: string }> = [
+  { key: 'lime',   labelKey: 'settings.accentLime', swatch: '#a3e635' },
+  { key: 'rose',   labelKey: 'settings.accentRose', swatch: '#f472b6' },
+  { key: 'red',    labelKey: 'settings.accentRed', swatch: '#f87171' },
+  { key: 'sky',    labelKey: 'settings.accentSky', swatch: '#7dd3fc' },
+  { key: 'violet', labelKey: 'settings.accentViolet', swatch: '#c4b5fd' },
+  { key: 'mono',   labelKey: 'settings.accentMono', swatch: '#888888' },
 ];
 
 interface BeforeInstallPromptEvent extends Event {
@@ -22,8 +21,7 @@ interface BeforeInstallPromptEvent extends Event {
 
 export default function SettingsView() {
   const { t, lang } = useT();
-  const confirm = useConfirm();
-  const [theme, setTheme] = useState<'light' | 'dark' | 'amoled'>('dark');
+  const [theme, setTheme] = useState<ThemeMode>('dark');
   const [accent, setAccent] = useState<string>('lime');
   const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null);
   const [isInstalled, setIsInstalled] = useState(false);
@@ -33,7 +31,9 @@ export default function SettingsView() {
   const [wiping, setWiping] = useState(false);
 
   useEffect(() => {
-    setTheme((document.documentElement.getAttribute('data-theme') as 'light' | 'dark' | 'amoled') || 'dark');
+    const stored = document.documentElement.getAttribute('data-theme') as ThemeMode | null;
+    const resolved = stored && THEMES.includes(stored) ? stored : 'dark';
+    setTheme(resolved);
     setAccent(document.documentElement.getAttribute('data-accent') || 'lime');
 
     const standalone =
@@ -52,12 +52,22 @@ export default function SettingsView() {
     return () => window.removeEventListener('beforeinstallprompt', onPrompt);
   }, []);
 
-  function toggleTheme() {
-    // Cycle: dark → light → amoled → dark…
-    const next = theme === 'dark' ? 'light' : theme === 'light' ? 'amoled' : 'dark';
+  function cycleTheme() {
+    const idx = THEMES.indexOf(theme);
+    const next = THEMES[(idx + 1) % THEMES.length];
     document.documentElement.setAttribute('data-theme', next);
-    try { localStorage.setItem('theme', next); } catch {}
+    try {
+      localStorage.setItem('theme', next);
+      const meta = document.getElementById('meta-theme-color');
+      if (meta) meta.setAttribute('content', themeColor(next));
+    } catch {}
     setTheme(next);
+  }
+
+  function themeLabel(mode: ThemeMode) {
+    if (mode === 'light') return t('settings.themeLight');
+    if (mode === 'amoled') return t('settings.themeAmoled');
+    return t('settings.themeDark');
   }
 
   function setAccentColor(next: string) {
@@ -85,8 +95,8 @@ export default function SettingsView() {
       // Log the full error to the console so it's easy to ask the user to
       // read us back what happened (fits on a phone too).
       console.error('[import] failed', e);
-      const detail = e?.message ?? String(e) ?? t('settings.errorImportDefault');
-      toast.error(detail);
+      const detail = e?.message ?? String(e) ?? t('common.errorImport');
+      alert(detail);
       setImporting(false);
     }
   }
@@ -108,7 +118,7 @@ export default function SettingsView() {
         URL.revokeObjectURL(url);
       }, 0);
     } catch (e: any) {
-      toast.error(e?.message ?? t('settings.errorExportDefault'));
+      alert(e?.message ?? t('common.errorExport'));
     } finally {
       setExporting(false);
     }
@@ -121,13 +131,7 @@ export default function SettingsView() {
   }
 
   async function wipeDrive() {
-    const ok = await confirm({
-      title: t('settings.wipeDrive'),
-      body: t('settings.wipeDriveConfirm'),
-      confirmLabel: t('action.delete'),
-      destructive: true,
-    });
-    if (!ok) return;
+    if (!window.confirm(t('settings.wipeDriveConfirm'))) return;
     setWiping(true);
     try {
       await wipeAll();
@@ -135,7 +139,7 @@ export default function SettingsView() {
       // so the flow feels clean.
       window.location.replace('/');
     } catch (e: any) {
-      toast.error(e?.message ?? t('settings.errorWipeDefault'));
+      alert(e?.message ?? t('common.error'));
       setWiping(false);
     }
   }
@@ -160,22 +164,20 @@ export default function SettingsView() {
 
         <button
           type="button"
-          onClick={toggleTheme}
+          onClick={cycleTheme}
           className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-sm transition hover:bg-elevated"
         >
           <span className="flex items-center gap-2.5">
             {theme === 'light' ? (
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="4" /><path d="M12 2v2" /><path d="M12 20v2" /><path d="m4.93 4.93 1.41 1.41" /><path d="m17.66 17.66 1.41 1.41" /><path d="M2 12h2" /><path d="M20 12h2" /><path d="m6.34 17.66-1.41 1.41" /><path d="m19.07 4.93-1.41 1.41" /></svg>
             ) : theme === 'amoled' ? (
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="12" cy="12" r="9" /></svg>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 9h6v6H9z" /></svg>
             ) : (
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" /></svg>
             )}
             {t('settings.theme')}
           </span>
-          <span className="text-muted">
-            {theme === 'dark' ? t('settings.themeDark') : theme === 'light' ? t('settings.themeLight') : t('settings.themeAmoled')}
-          </span>
+          <span className="text-muted">{themeLabel(theme)}</span>
         </button>
 
         <div className="mt-3 border-t border-border pt-3">
@@ -188,8 +190,8 @@ export default function SettingsView() {
                   key={a.key}
                   type="button"
                   onClick={() => setAccentColor(a.key)}
-                  title={a.label}
-                  aria-label={a.label}
+                  title={t(a.labelKey)}
+                  aria-label={t(a.labelKey)}
                   className={`grid h-9 w-9 shrink-0 place-items-center rounded-full transition ${isActive ? 'ring-2 ring-fg ring-offset-2 ring-offset-card' : 'opacity-70 hover:opacity-100'}`}
                   style={{ background: a.swatch }}
                 >
@@ -248,19 +250,19 @@ export default function SettingsView() {
             </>
           ) : ua.ios ? (
             <ol className="flex flex-col gap-2 text-sm text-muted">
-              <li>1. {t('settings.installIosStep1')}</li>
-              <li>2. {t('settings.installIosStep2')}</li>
-              <li>3. {t('settings.installIosStep3')}</li>
+              <li>{t('settings.installIos1')}</li>
+              <li>{t('settings.installIos2')}</li>
+              <li>{t('settings.installIos3')}</li>
             </ol>
           ) : ua.android ? (
             <ol className="flex flex-col gap-2 text-sm text-muted">
-              <li>1. {t('settings.installAndroidStep1')}</li>
-              <li>2. {t('settings.installAndroidStep2')}</li>
+              <li>{t('settings.installAndroid1')}</li>
+              <li>{t('settings.installAndroid2')}</li>
             </ol>
           ) : (
             <ol className="flex flex-col gap-2 text-sm text-muted">
-              <li>1. {t('settings.installDesktopStep1')}</li>
-              <li>2. {t('settings.installDesktopStep2')}</li>
+              <li>{t('settings.installDesktop1')}</li>
+              <li>{t('settings.installDesktop2')}</li>
             </ol>
           )}
         </section>

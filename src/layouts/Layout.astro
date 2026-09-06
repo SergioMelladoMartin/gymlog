@@ -4,9 +4,7 @@ import { ClientRouter, fade } from 'astro:transitions';
 import SideNav from '../components/SideNav';
 import SyncStatus from '../components/SyncStatus';
 import Onboarding from '../components/Onboarding';
-import UIHost from '../components/ui/UIHost';
-import BottomNav from '../components/BottomNav';
-import HeaderAvatar from '../components/HeaderAvatar';
+import NavTitle from '../components/NavTitle';
 
 interface Props {
   title?: string;
@@ -14,39 +12,15 @@ interface Props {
 }
 
 const { title = 'gymlog', activeNav = 'today' } = Astro.props;
-
-const navTitle = {
-  today: 'Hoy',
-  calendar: 'Calendario',
-  diary: 'Diario',
-  exercises: 'Ejercicios',
-  stats: 'Estadísticas',
-  login: 'Acceso',
-}[activeNav];
-
-// i18n key mirroring the above so the client script below can swap the text
-// to English without a reload when the stored language is 'en'. Server-side
-// render always shows the Spanish default (no FOUC on the common case).
-const navTitleKey = {
-  today: 'nav.today',
-  calendar: 'nav.calendar',
-  diary: 'nav.diary',
-  exercises: 'nav.exercises',
-  stats: 'nav.stats',
-  login: 'nav.login',
-}[activeNav];
 ---
 <html lang="es">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#0f0f15" />
+    <meta name="theme-color" content="#0f0f15" id="meta-theme-color" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
-    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="gymlog" />
     <title>{title}</title>
     <ClientRouter />
     <script is:inline data-astro-rerun>
@@ -54,7 +28,14 @@ const navTitleKey = {
         try {
           var stored = localStorage.getItem('theme');
           var sysDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-          document.documentElement.setAttribute('data-theme', stored || (sysDark ? 'dark' : 'light'));
+          var theme = stored || (sysDark ? 'dark' : 'light');
+          if (theme !== 'light' && theme !== 'amoled') theme = 'dark';
+          document.documentElement.setAttribute('data-theme', theme);
+          var themeColors = { dark: '#0f0f15', light: '#eef0f5', amoled: '#000000' };
+          var meta = document.getElementById('meta-theme-color');
+          if (meta) meta.setAttribute('content', themeColors[theme] || themeColors.dark);
+          var lang = localStorage.getItem('gymlog-lang');
+          if (lang === 'es' || lang === 'en') document.documentElement.setAttribute('lang', lang);
           var accent = localStorage.getItem('accent');
           if (accent && accent !== 'lime') document.documentElement.setAttribute('data-accent', accent);
           // Apply the persisted "collapsed sidebar" preference before paint.
@@ -63,24 +44,6 @@ const navTitleKey = {
           // body may not exist yet during <head>; the class is also applied
           // inline below as a fallback through the data attribute.
           window.__gymlogSidenavCollapsed = collapsed;
-        } catch (e) {}
-      })();
-    </script>
-    <script is:inline data-astro-rerun>
-      // Swap the nav title to the stored language, client-side only, using
-      // the same dictionaries as src/lib/i18n.ts (kept inline so this runs
-      // before the React islands hydrate, avoiding a flash of Spanish→English).
-      (function () {
-        try {
-          var lang = localStorage.getItem('gymlog-lang');
-          if (lang !== 'en') return;
-          var EN = {
-            'nav.today': 'Today', 'nav.calendar': 'Calendar', 'nav.diary': 'Diary',
-            'nav.exercises': 'Exercises', 'nav.stats': 'Stats', 'nav.login': 'Sign in',
-          };
-          var el = document.querySelector('[data-navtitle-key]');
-          var key = el && el.getAttribute('data-navtitle-key');
-          if (el && key && EN[key]) el.textContent = EN[key];
         } catch (e) {}
       })();
     </script>
@@ -118,6 +81,14 @@ const navTitleKey = {
         }
         document.addEventListener('astro:before-preparation', start);
         document.addEventListener('astro:page-load', done);
+        // Main content spinner — see global.css (avoid astro-island:empty).
+        var main = document.querySelector('main');
+        document.addEventListener('astro:before-preparation', function () {
+          main && main.setAttribute('data-nav-loading', '');
+        });
+        document.addEventListener('astro:page-load', function () {
+          main && main.removeAttribute('data-nav-loading');
+        });
       })();
     </script>
     <script is:inline>
@@ -134,7 +105,7 @@ const navTitleKey = {
         {activeNav !== 'login' && (
           <button
             type="button"
-            class="hidden h-9 w-9 place-items-center rounded-lg border border-border bg-elevated/60 text-fg transition hover:bg-elevated"
+            class="grid h-9 w-9 place-items-center rounded-lg border border-border bg-elevated/60 text-fg transition hover:bg-elevated lg:hidden"
             aria-label="Abrir menú"
             onclick="window.dispatchEvent(new CustomEvent('gymlog:open-sidenav'))"
           >
@@ -155,20 +126,19 @@ const navTitleKey = {
               <path d="M6.404 12.768a2 2 0 1 1-2.829-2.829l1.768-1.767a2 2 0 1 1-2.828-2.829l2.828-2.828a2 2 0 1 1 2.829 2.828l1.767-1.768a2 2 0 1 1 2.829 2.829z" />
             </svg>
           </a>
-          <span class="truncate text-[15px] font-semibold tracking-tight" data-navtitle-key={navTitleKey}>{navTitle}</span>
+          {activeNav !== 'login' ? (
+            <NavTitle client:load transition:persist="nav-title" active={activeNav} />
+          ) : (
+            <span class="truncate text-[15px] font-semibold tracking-tight">gymlog</span>
+          )}
         </div>
-        {activeNav !== 'login' && <HeaderAvatar client:only="react" transition:persist="header-avatar" />}
         {activeNav !== 'login' && <SyncStatus client:only="react" transition:persist="sync-status" />}
       </div>
     </header>
 
-    <main class="mx-auto max-w-3xl px-4 py-6 pb-24 lg:pb-6" transition:animate={fade({ duration: '0.2s' })}>
+    <main class="mx-auto max-w-3xl px-4 py-6" transition:animate={fade({ duration: '0.2s' })}>
       <slot />
     </main>
     {activeNav !== 'login' && <Onboarding client:only="react" />}
-    {activeNav !== 'login' && (
-      <BottomNav client:only="react" transition:persist="bottom-nav" active={activeNav as any} />
-    )}
-    <UIHost client:only="react" transition:persist="ui-host" />
   </body>
 </html>

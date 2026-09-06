@@ -1,11 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useDatabase } from '../hooks/useDatabase';
+import { useLocale } from '../hooks/useLocale';
 import { getDayPrCounts } from '../lib/queries';
 import { getDb } from '../lib/sqlite';
-import { useT } from '../hooks/useT';
-import { getLocale } from '../lib/i18n';
-import { DiarySkeleton } from './ui/Skeleton';
 import EmptyState from './EmptyState';
+import { DiarySkeleton } from './Skeleton';
 
 interface DayRow {
   date: string;
@@ -29,20 +28,9 @@ function argbToHex(n: number | null): string | null {
   return '#' + [(u >> 16) & 0xff, (u >> 8) & 0xff, u & 0xff].map((v) => v.toString(16).padStart(2, '0')).join('');
 }
 
-function formatDate(iso: string, locale: string) {
-  const d = new Date(iso + 'T00:00:00');
-  return {
-    weekday: d.toLocaleDateString(locale, { weekday: 'short' }).replace('.', ''),
-    day: d.getDate(),
-    month: d.toLocaleDateString(locale, { month: 'short' }).replace('.', ''),
-    year: d.getFullYear(),
-  };
-}
-
 export default function DiaryView() {
-  const { t, lang } = useT();
-  const locale = getLocale(lang);
-  const ready = useDatabase();
+  const { ready, revision } = useDatabase();
+  const { t, fmt, fmtDate } = useLocale();
   const [days, setDays] = useState<DayRow[]>([]);
   const [breakdown, setBreakdown] = useState<Map<string, BreakdownRow[]>>(new Map());
   const [comments, setComments] = useState<Map<string, string>>(new Map());
@@ -135,19 +123,26 @@ export default function DiaryView() {
       setHasOlder(!!oldest && !!db.selectValue('SELECT EXISTS(SELECT 1 FROM training_log WHERE date < ?) AS has', [oldest]));
       setHasNewer(!!newest && paged && !!db.selectValue('SELECT EXISTS(SELECT 1 FROM training_log WHERE date > ?) AS has', [newest]));
     }
-  }, [ready, before, after]);
+  }, [ready, revision, before, after, paged]);
 
   if (!ready) return <DiarySkeleton />;
 
   const oldestDate = days.at(-1)?.date;
   const newestDate = days[0]?.date;
 
+  const formatDay = (iso: string) => ({
+    weekday: fmtDate(iso, { weekday: 'short' }),
+    day: new Date(iso + 'T00:00:00').getDate(),
+    month: fmtDate(iso, { month: 'short' }),
+    year: new Date(iso + 'T00:00:00').getFullYear(),
+  });
+
   return (
     <>
       <div className="mb-4 flex items-end justify-between gap-3">
         <div>
-          <div className="text-xs font-medium uppercase tracking-wider text-muted">{t('diary.historic')}</div>
-          <h1 className="text-3xl font-semibold tracking-tight">{t('nav.diary')}</h1>
+          <div className="text-xs font-medium uppercase tracking-wider text-muted">{t('diary.history')}</div>
+          <h1 className="text-3xl font-semibold tracking-tight">{t('diary.title')}</h1>
         </div>
         {paged && (
           <a href="/diary" className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border bg-elevated/60 px-3 py-1.5 text-xs font-medium text-muted transition hover:bg-elevated hover:text-fg">
@@ -158,13 +153,13 @@ export default function DiaryView() {
       </div>
 
       {days.length === 0 ? (
-        <EmptyState variant="diary" body={t('diary.noWorkouts')} />
+        <EmptyState variant="diary" />
       ) : (
         <div className="flex flex-col gap-3">
           {days.map((d) => {
             const exs = breakdown.get(d.date) ?? [];
             const note = comments.get(d.date);
-            const f = formatDate(d.date, locale);
+            const f = formatDay(d.date);
             const pr = prs.get(d.date);
             const prTotal = (pr?.pr_weight ?? 0) + (pr?.pr_reps ?? 0);
             return (
@@ -188,7 +183,7 @@ export default function DiaryView() {
                       )}
                     </div>
                     <div className="text-xs tabular-nums text-muted">
-                      {t('diary.summary', { ex: d.exercise_count, sets: d.set_count, vol: Math.round(d.volume).toLocaleString(locale) })}
+                      {t('diary.summary', { ex: d.exercise_count, sets: d.set_count, vol: fmt(d.volume) })}
                     </div>
                   </div>
                   <ul className="mt-2 flex flex-col gap-1 text-sm">
@@ -198,7 +193,9 @@ export default function DiaryView() {
                           <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: e.category_color ?? '#888' }} />
                           <span className="truncate">{e.exercise_name}</span>
                         </span>
-                        <span className="shrink-0 tabular-nums text-muted">{e.sets}× · {t('diary.top')} {e.top_weight}×{e.top_reps}</span>
+                        <span className="shrink-0 tabular-nums text-muted">
+                          {t('diary.setTop', { sets: e.sets, weight: e.top_weight, reps: e.top_reps })}
+                        </span>
                       </li>
                     ))}
                   </ul>
