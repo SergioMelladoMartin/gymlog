@@ -169,11 +169,6 @@ const ES: Dict = {
   'login.uploadCta': 'Subir mi backup .fitnotes a Drive',
   'login.privacy':
     'Con Google: pedimos acceso solo a la carpeta oculta "appdata" de tu Drive. Tus entrenos se guardan en un archivo gymlog.fitnotes compatible con la app FitNotes.',
-  'auth.error.generic': 'No se pudo iniciar sesión con Google. Inténtalo de nuevo.',
-  'auth.error.server_not_configured': 'El servidor de autenticación no está configurado todavía. Avisa al administrador de la app.',
-  'auth.error.state_mismatch': 'La sesión de inicio caducó. Inténtalo de nuevo.',
-  'auth.error.token_exchange_failed': 'Google no pudo confirmar el inicio de sesión. Inténtalo de nuevo.',
-  'auth.error.missing_scope': 'Falta el permiso de Drive. Vuelve a intentarlo y marca la casilla de acceso a Drive.',
 
   // Empty states
   'empty.diary.title': 'Diario vacío',
@@ -270,8 +265,8 @@ const ES: Dict = {
   'sync.dirty': 'Cambios sin subir',
   'sync.error': 'Error al sincronizar',
   'sync.offline': 'Sin conexión',
-  'sync.reauth': 'Sesión caducada · toca para entrar',
-  'sync.tapToRenew': 'Toca para volver a iniciar sesión',
+  'sync.tokenExpired': 'Renovar acceso',
+  'sync.tapToRenew': 'Toca para renovar el acceso a Drive',
   'sync.justNow': 'ahora',
   'sync.minAgo': 'hace {n} min',
   'sync.hourAgo': 'hace {n} h',
@@ -442,11 +437,6 @@ const EN: Dict = {
   'login.uploadCta': 'Upload my .fitnotes backup to Drive',
   'login.privacy':
     'With Google we only request access to the hidden "appdata" folder on your Drive. Your workouts are stored in a gymlog.fitnotes file compatible with the FitNotes app.',
-  'auth.error.generic': 'Could not sign in with Google. Please try again.',
-  'auth.error.server_not_configured': 'The authentication server is not configured yet. Let the app admin know.',
-  'auth.error.state_mismatch': 'The sign-in session expired. Please try again.',
-  'auth.error.token_exchange_failed': 'Google could not confirm the sign-in. Please try again.',
-  'auth.error.missing_scope': 'Drive permission is missing. Try again and check the Drive access box.',
 
   'empty.diary.title': 'Empty diary',
   'empty.diary.body': 'Your first logged workout will show up here.',
@@ -537,8 +527,8 @@ const EN: Dict = {
   'sync.dirty': 'Unsaved changes',
   'sync.error': 'Sync error',
   'sync.offline': 'Offline',
-  'sync.reauth': 'Session expired · tap to sign in',
-  'sync.tapToRenew': 'Tap to sign in again',
+  'sync.tokenExpired': 'Renew access',
+  'sync.tapToRenew': 'Tap to renew Drive access',
   'sync.justNow': 'just now',
   'sync.minAgo': '{n} min ago',
   'sync.hourAgo': '{n} h ago',

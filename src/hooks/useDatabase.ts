@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { getStatus, loadDatabase, onStatusChange } from '../lib/sqlite';
-import { hasSession } from '../lib/auth';
+import { hasAccount } from '../lib/auth';
 
 export interface DatabaseState {
   ready: boolean;
@@ -26,7 +26,7 @@ export function useDatabase(): DatabaseState {
   }, []);
 
   useEffect(() => {
-    if (status === 'empty' && !hasSession() && typeof window !== 'undefined') {
+    if (status === 'empty' && !hasAccount() && typeof window !== 'undefined') {
       window.location.replace('/login');
     }
   }, [status]);

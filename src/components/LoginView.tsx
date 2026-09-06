@@ -1,39 +1,7 @@
 import { useEffect, useState } from 'react';
-import { hasSession, signIn } from '../lib/auth';
-import { importBytes } from '../lib/sqlite';
+import { hasAccount, signIn } from '../lib/auth';
+import { importBytes, loadDatabase } from '../lib/sqlite';
 import { useT } from '../hooks/useT';
-
-const PENDING_IMPORT_NAME = 'pending-import.fitnotes';
-
-async function opfsWritePending(bytes: Uint8Array): Promise<void> {
-  if (!('storage' in navigator) || !navigator.storage.getDirectory) return;
-  const root = await navigator.storage.getDirectory();
-  const handle = await root.getFileHandle(PENDING_IMPORT_NAME, { create: true });
-  const w = await (handle as any).createWritable();
-  await w.write(bytes);
-  await w.close();
-}
-
-async function opfsReadAndClearPending(): Promise<Uint8Array | null> {
-  if (!('storage' in navigator) || !navigator.storage.getDirectory) return null;
-  try {
-    const root = await navigator.storage.getDirectory();
-    const handle = await root.getFileHandle(PENDING_IMPORT_NAME, { create: false });
-    const file = await handle.getFile();
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    await root.removeEntry(PENDING_IMPORT_NAME).catch(() => {});
-    return bytes;
-  } catch {
-    return null;
-  }
-}
-
-const ERROR_KEYS: Record<string, string> = {
-  server_not_configured: 'auth.error.server_not_configured',
-  state_mismatch: 'auth.error.state_mismatch',
-  token_exchange_failed: 'auth.error.token_exchange_failed',
-  missing_scope: 'auth.error.missing_scope',
-};
 
 export default function LoginView() {
   const { t } = useT();
@@ -41,56 +9,28 @@ export default function LoginView() {
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
-    if (hasSession() && new URLSearchParams(location.search).get('import') !== '1') {
-      window.location.replace('/');
-      return;
-    }
-    const params = new URLSearchParams(location.search);
-    const errorParam = params.get('error');
-    if (errorParam) {
-      setErr(t(ERROR_KEYS[errorParam] ?? 'auth.error.generic'));
-    }
+    if (hasAccount()) window.location.replace('/');
   }, []);
 
-  // Coming back from signIn('/login?import=1') after handleUpload stashed a
-  // backup in OPFS because the user wasn't signed in yet.
-  useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    if (params.get('import') === '1' && hasSession()) {
-      void (async () => {
-        const bytes = await opfsReadAndClearPending();
-        if (!bytes) return;
-        setBusy(true);
-        try {
-          await importBytes(bytes);
-          window.location.replace('/');
-        } catch (e: any) {
-          setErr(e?.message ?? String(e));
-          setBusy(false);
-        }
-      })();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  function handleGoogle() {
+  async function handleGoogle() {
     setErr(null);
     setBusy(true);
-    signIn('/');
+    try {
+      await signIn();
+      await loadDatabase({ seedUrl: import.meta.env.DEV ? '/seed.fitnotes' : undefined });
+      window.location.replace('/');
+    } catch (e: any) {
+      setErr(e?.message ?? String(e));
+      setBusy(false);
+    }
   }
 
   async function handleUpload(file: File) {
     setErr(null);
     setBusy(true);
     try {
+      if (!hasAccount()) await signIn();
       const bytes = new Uint8Array(await file.arrayBuffer());
-      if (!hasSession()) {
-        // Stash the backup and come back through the OAuth flow before
-        // importing — importBytes() needs a session to push to Drive.
-        await opfsWritePending(bytes);
-        signIn('/login?import=1');
-        return;
-      }
       await importBytes(bytes);
       window.location.replace('/');
     } catch (e: any) {

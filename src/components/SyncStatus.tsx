@@ -1,26 +1,28 @@
 import { useEffect, useRef, useState } from 'react';
 import { forceSync, getSyncInfo, onSyncChange, type SyncState } from '../lib/sqlite';
-import { signIn } from '../lib/auth';
+import { getAuthStatus, onAuthChange, renewAccess, type AuthStatus } from '../lib/auth';
 import { hapticSuccess } from '../lib/haptics';
 import { useT } from '../hooks/useT';
 
 /**
  * Compact sync pill in the header. States:
- *   • idle     → ✓ hace 3 min
- *   • dirty    → cambios sin subir
- *   • syncing  → subiendo
- *   • error    → error al sincronizar
- *   • reauth   → sesión caducada, toca para entrar
- *   • offline  → sin conexión
+ *   • idle            → ✓ hace 3 min
+ *   • dirty           → cambios sin subir
+ *   • syncing         → subiendo
+ *   • error           → error al sincronizar
+ *   • token_expired   → renovar acceso a Drive
+ *   • offline         → sin conexión
  */
 export default function SyncStatus() {
   const { t } = useT();
   const [info, setInfo] = useState(() => getSyncInfo());
+  const [authStatus, setAuthStatus] = useState<AuthStatus>(() => getAuthStatus());
   const [online, setOnline] = useState(() => typeof navigator === 'undefined' ? true : navigator.onLine);
   const [, setTick] = useState(0);
   const prevState = useRef<SyncState>(info.state);
 
   useEffect(() => onSyncChange(setInfo), []);
+  useEffect(() => onAuthChange(setAuthStatus), []);
 
   useEffect(() => {
     const onOn = () => setOnline(true);
@@ -46,7 +48,12 @@ export default function SyncStatus() {
     prevState.current = state;
   }, [state, online]);
 
-  const effState: SyncState = !online && state !== 'syncing' ? 'error' : state;
+  const tokenExpired = authStatus === 'token_expired';
+  const effState: SyncState = !online && state !== 'syncing'
+    ? 'error'
+    : tokenExpired && state === 'idle'
+      ? 'error'
+      : state;
 
   let tone = 'text-muted';
   let icon: React.ReactNode = null;
@@ -58,11 +65,11 @@ export default function SyncStatus() {
     label = t('sync.offline');
     icon = <DotIcon />;
     aria = t('sync.offline');
-  } else if (effState === 'reauth') {
+  } else if (tokenExpired && state !== 'syncing' && state !== 'dirty') {
     tone = 'text-amber-400';
-    label = t('sync.reauth');
+    label = t('sync.tokenExpired');
     icon = <KeyIcon />;
-    aria = `${t('sync.reauth')} — ${t('sync.tapToRenew')}`;
+    aria = `${t('sync.tokenExpired')} — ${t('sync.tapToRenew')}`;
   } else if (effState === 'syncing') {
     tone = 'text-amber-400';
     label = t('sync.syncing');
@@ -86,8 +93,9 @@ export default function SyncStatus() {
   }
 
   async function handleClick() {
-    if (effState === 'reauth') {
-      signIn(location.pathname + location.search);
+    if (tokenExpired) {
+      const ok = await renewAccess(true);
+      if (ok) await forceSync().catch(() => {});
       return;
     }
     await forceSync().catch(() => {});

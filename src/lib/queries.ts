@@ -3,7 +3,6 @@
 // database dirty so the store will flush to Google Drive on a debounce.
 
 import { getDb, markDirty } from './sqlite';
-import { appendOp } from './journal';
 import type {
   BodyWeight,
   Category,
@@ -101,7 +100,6 @@ export function createExercise(name: string, categoryId: number): number {
     bind: [name, categoryId],
   });
   const id = Number(db.selectValue('SELECT last_insert_rowid()'));
-  appendOp('createExercise', 'exercise', { name, category_id: categoryId });
   markDirty();
   return id;
 }
@@ -119,7 +117,6 @@ export function countExerciseSets(id: number): number {
 export function deleteExercise(id: number): void {
   exec('DELETE FROM training_log WHERE exercise_id = ?', [id]);
   exec('DELETE FROM exercise WHERE _id = ?', [id]);
-  appendOp('deleteExercise', 'exercise', { id });
   markDirty();
 }
 
@@ -131,7 +128,6 @@ export function updateExercise(id: number, patch: { name?: string; category_id?:
   if (!fields.length) return;
   params.push(id);
   exec(`UPDATE exercise SET ${fields.join(', ')} WHERE _id = ?`, params);
-  appendOp('updateExercise', 'exercise', { id, patch });
   markDirty();
 }
 
@@ -244,7 +240,6 @@ export function createSet(payload: {
     pr_reps: payload.reps > 0 && payload.reps > maxRepsAtOrAbove,
   };
 
-  appendOp('createSet', 'training_log', payload);
   markDirty();
   return { id, ...pr };
 }
@@ -267,20 +262,17 @@ export function updateSet(
   if (!fields.length) return;
   params.push(id);
   exec(`UPDATE training_log SET ${fields.join(', ')} WHERE _id = ?`, params);
-  appendOp('updateSet', 'training_log', { id, patch });
   markDirty();
 }
 
 export function deleteSet(id: number): void {
   exec('DELETE FROM training_log WHERE _id = ?', [id]);
-  appendOp('deleteSet', 'training_log', { id });
   markDirty();
 }
 
 /** Remove every set logged for this exercise on a given day (keeps the exercise in the catalog). */
 export function deleteExerciseFromDay(exerciseId: number, date: string): void {
   exec('DELETE FROM training_log WHERE exercise_id = ? AND date = ?', [exerciseId, date]);
-  appendOp('deleteExerciseFromDay', 'training_log', { exerciseId, date });
   markDirty();
 }
 
@@ -461,7 +453,6 @@ export function setWorkoutComment(date: string, body: string): void {
       exec('INSERT INTO WorkoutComment (date, comment) VALUES (?, ?)', [date, body]);
     }
   }
-  appendOp('setWorkoutComment', 'WorkoutComment', { date, body });
   markDirty();
 }
 
@@ -490,15 +481,6 @@ export function duplicateSet(setId: number): number {
     bind: [r.exercise_id, r.date, r.metric_weight, r.reps, r.unit ?? 0, r.distance ?? 0, r.duration_seconds ?? 0],
   });
   const id = Number(db.selectValue('SELECT last_insert_rowid()'));
-  appendOp('duplicateSet', 'training_log', {
-    exercise_id: r.exercise_id,
-    date: r.date,
-    metric_weight: r.metric_weight,
-    reps: r.reps,
-    unit: r.unit ?? 0,
-    distance: r.distance ?? 0,
-    duration_seconds: r.duration_seconds ?? 0,
-  });
   markDirty();
   return id;
 }
