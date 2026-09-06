@@ -5,6 +5,7 @@ import SideNav from '../components/SideNav';
 import SyncStatus from '../components/SyncStatus';
 import Onboarding from '../components/Onboarding';
 import NavTitle from '../components/NavTitle';
+import BottomNav from '../components/BottomNav';
 
 interface Props {
   title?: string;
@@ -136,9 +137,12 @@ const { title = 'gymlog', activeNav = 'today' } = Astro.props;
       </div>
     </header>
 
-    <main class="mx-auto max-w-3xl px-4 py-6" transition:animate={fade({ duration: '0.2s' })}>
+    <main class="mx-auto max-w-3xl px-4 py-6 pb-24 lg:pb-6" transition:animate={fade({ duration: '0.2s' })}>
       <slot />
     </main>
     {activeNav !== 'login' && <Onboarding client:only="react" />}
+    {activeNav !== 'login' && (
+      <BottomNav client:only="react" transition:persist="bottom-nav" active={activeNav as any} />
+    )}
   </body>
 </html>
