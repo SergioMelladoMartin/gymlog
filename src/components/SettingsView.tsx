@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { signOut } from '../lib/auth';
 import {
-  discardConflictCopy, exportBytes, getConflictCopy, importBytes, resetLocal, restoreConflictCopy, wipeAll,
+  discardConflictCopy, exportBytes, getConflictCopies, importBytes, resetLocal, restoreConflictCopy, wipeAll,
 } from '../lib/sqlite';
 import { useT } from '../hooks/useT';
+import type { ConflictCopy } from '../lib/localBackup';
 import { setLang, type Lang } from '../lib/i18n';
 import { THEMES, themeColor, type ThemeMode } from '../lib/locale';
 
@@ -31,11 +32,11 @@ export default function SettingsView() {
   const [importing, setImporting] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [wiping, setWiping] = useState(false);
-  const [conflict, setConflict] = useState<{ bytes: Uint8Array; at: number } | null>(null);
+  const [conflicts, setConflicts] = useState<ConflictCopy[]>([]);
   const [restoring, setRestoring] = useState(false);
 
   useEffect(() => {
-    const refresh = () => { void getConflictCopy().then(setConflict); };
+    const refresh = () => { void getConflictCopies().then(setConflicts); };
     refresh();
     window.addEventListener('gymlog:sync-conflict', refresh);
     return () => window.removeEventListener('gymlog:sync-conflict', refresh);
@@ -126,11 +127,11 @@ export default function SettingsView() {
     }, 0);
   }
 
-  async function handleRestoreConflict() {
+  async function handleRestoreConflict(id: string) {
     if (!confirm(t('settings.conflictRestoreConfirm'))) return;
     setRestoring(true);
     try {
-      await restoreConflictCopy();
+      await restoreConflictCopy(id);
       window.location.reload();
     } catch (e: any) {
       alert(e?.message ?? String(e));
@@ -294,36 +295,42 @@ export default function SettingsView() {
         </section>
       )}
 
-      {/* Local copy set aside by a sync conflict */}
-      {conflict && (
+      {/* Local copies set aside by sync conflicts */}
+      {conflicts.length > 0 && (
         <section id="sync-conflict" className="card mb-4 border-amber-400/40 bg-amber-400/5 p-4">
           <div className="section-title mb-2 text-amber-400">{t('settings.conflictTitle')}</div>
-          <p className="mb-3 text-sm text-muted">
-            {t('settings.conflictBlurb', { date: new Date(conflict.at).toLocaleString() })}
-          </p>
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={() => { void handleRestoreConflict(); }}
-              disabled={restoring}
-              className="btn-accent col-span-2 rounded-lg px-3 py-2.5 text-sm font-semibold transition disabled:opacity-40"
-            >
-              {t('settings.conflictRestore')}
-            </button>
-            <button
-              type="button"
-              onClick={() => downloadBytes(conflict.bytes, `gymlog-conflicto-${new Date(conflict.at).toISOString().slice(0, 10)}.fitnotes`)}
-              className="rounded-lg border border-border bg-elevated/60 px-3 py-2.5 text-sm font-medium transition hover:bg-elevated"
-            >
-              {t('settings.conflictDownload')}
-            </button>
-            <button
-              type="button"
-              onClick={() => { void discardConflictCopy(); }}
-              className="rounded-lg border border-border bg-elevated/60 px-3 py-2.5 text-sm font-medium text-muted transition hover:bg-elevated"
-            >
-              {t('settings.conflictDiscard')}
-            </button>
+          <div className="flex flex-col gap-4">
+            {conflicts.map((c) => (
+              <div key={c.id}>
+                <p className="mb-3 text-sm text-muted">
+                  {t('settings.conflictBlurb', { date: new Date(c.at).toLocaleString() })}
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => { void handleRestoreConflict(c.id); }}
+                    disabled={restoring}
+                    className="btn-accent col-span-2 rounded-lg px-3 py-2.5 text-sm font-semibold transition disabled:opacity-40"
+                  >
+                    {t('settings.conflictRestore')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => downloadBytes(c.bytes, `gymlog-conflicto-${new Date(c.at).toISOString().slice(0, 10)}.fitnotes`)}
+                    className="rounded-lg border border-border bg-elevated/60 px-3 py-2.5 text-sm font-medium transition hover:bg-elevated"
+                  >
+                    {t('settings.conflictDownload')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { void discardConflictCopy(c.id); }}
+                    className="rounded-lg border border-border bg-elevated/60 px-3 py-2.5 text-sm font-medium text-muted transition hover:bg-elevated"
+                  >
+                    {t('settings.conflictDiscard')}
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
         </section>
       )}

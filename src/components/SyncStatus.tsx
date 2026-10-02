@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { forceSync, getConflictCopy, getSyncInfo, onSyncChange, type SyncState } from '../lib/sqlite';
+import { forceSync, getConflictCopies, getSyncInfo, onSyncChange, type SyncState } from '../lib/sqlite';
 import { getAuthStatus, onAuthChange, renewAccess, type AuthStatus } from '../lib/auth';
 import { hapticSuccess } from '../lib/haptics';
 import { useT } from '../hooks/useT';
@@ -27,7 +27,7 @@ export default function SyncStatus() {
   useEffect(() => onAuthChange(setAuthStatus), []);
 
   useEffect(() => {
-    const refresh = () => { void getConflictCopy().then((c) => setHasConflict(!!c)); };
+    const refresh = () => { void getConflictCopies().then((list) => setHasConflict(list.length > 0)); };
     refresh();
     window.addEventListener('gymlog:sync-conflict', refresh);
     return () => window.removeEventListener('gymlog:sync-conflict', refresh);

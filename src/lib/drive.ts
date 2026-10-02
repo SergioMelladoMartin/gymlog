@@ -40,18 +40,37 @@ function transferTimeout(bytes: number): number {
 export type RemoteFile = { id: string; modifiedTime: string; size: number; md5: string | null };
 
 /** True for failures caused by the connection (offline, DNS, timeout) rather
- *  than by Drive rejecting the request. Those are retried quietly. */
+ *  than by Drive rejecting the request or by a bug. Those are retried quietly;
+ *  everything else surfaces as a sync error. */
 export function isNetworkError(e: unknown): boolean {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return true;
-  const err = e as { name?: string } | null;
-  return err?.name === 'AbortError' || err?.name === 'TimeoutError' || e instanceof TypeError;
+  const err = e as { name?: string; message?: string } | null;
+  if (err?.name === 'AbortError' || err?.name === 'TimeoutError') return true;
+  // fetch() rejects with a TypeError on network failure: "Failed to fetch"
+  // (Chrome), "Load failed" (Safari), "NetworkError when attempting…" (Firefox).
+  return e instanceof TypeError && /fetch|load failed|network/i.test(err?.message ?? '');
 }
 
-async function timedFetch(input: RequestInfo, init: RequestInit = {}, timeoutMs = META_TIMEOUT_MS): Promise<Response> {
+type DriveResponse<T> = { ok: boolean; status: number; body: T; error: string };
+
+/** fetch + body read under one timeout. On a weak signal the headers can
+ *  arrive and the body then stall, so the read must be covered as well, or a
+ *  sync round could hang forever. */
+async function request<T = unknown>(
+  input: string,
+  init: RequestInit,
+  read: 'json' | 'arrayBuffer' | 'none',
+  timeoutMs = META_TIMEOUT_MS,
+): Promise<DriveResponse<T>> {
   const ac = new AbortController();
   const t = setTimeout(() => ac.abort(), timeoutMs);
   try {
-    return await fetch(input, { ...init, signal: ac.signal });
+    const res = await fetch(input, { ...init, signal: ac.signal });
+    if (!res.ok) {
+      return { ok: false, status: res.status, body: null as T, error: await res.text().catch(() => '') };
+    }
+    const body = read === 'json' ? await res.json() : read === 'arrayBuffer' ? await res.arrayBuffer() : null;
+    return { ok: true, status: res.status, body: body as T, error: '' };
   } finally {
     clearTimeout(t);
   }
@@ -83,7 +102,7 @@ async function findFile(retryOn403 = true): Promise<RemoteFile | null> {
     fields: `files(${FILE_FIELDS})`,
     pageSize: '1',
   });
-  const res = await timedFetch(`${DRIVE_API}/files?${params}`, { headers });
+  const res = await request<{ files?: any[] }>(`${DRIVE_API}/files?${params}`, { headers }, 'json');
   if (res.status === 403 && retryOn403) {
     // Token lacks drive.appdata. Re-prompt for consent with the Drive
     // checkbox and try once more.
@@ -97,8 +116,7 @@ async function findFile(retryOn403 = true): Promise<RemoteFile | null> {
         : `drive list failed: ${res.status}`,
     );
   }
-  const data = await res.json();
-  const file = data.files?.[0];
+  const file = res.body.files?.[0];
   if (!file) return null;
   setCachedFileId(file.id);
   return toRemoteFile(file);
@@ -110,9 +128,9 @@ export async function pullBlobFromDrive(known?: RemoteFile): Promise<ArrayBuffer
   const file = known ?? await findFile();
   if (!file) return null;
   const headers = await authHeaders();
-  const res = await timedFetch(`${DRIVE_API}/files/${file.id}?alt=media`, { headers }, transferTimeout(file.size));
+  const res = await request<ArrayBuffer>(`${DRIVE_API}/files/${file.id}?alt=media`, { headers }, 'arrayBuffer', transferTimeout(file.size));
   if (!res.ok) throw new Error(`drive download failed: ${res.status}`);
-  return res.arrayBuffer();
+  return res.body;
 }
 
 export async function getRemoteMeta() {
@@ -143,27 +161,26 @@ async function createFile(bytes: Uint8Array): Promise<RemoteFile> {
   headers.set('Content-Type', `multipart/related; boundary=${boundary}`);
   // Ask Drive to echo the new modifiedTime/size in the response so we
   // don't need a separate findFile() round-trip after a push.
-  const res = await timedFetch(`${UPLOAD_API}/files?uploadType=multipart&fields=${FILE_FIELDS}`, {
+  const res = await request<any>(`${UPLOAD_API}/files?uploadType=multipart&fields=${FILE_FIELDS}`, {
     method: 'POST',
     headers,
     body,
-  }, transferTimeout(bytes.byteLength));
-  if (!res.ok) throw new Error(`drive create failed: ${res.status} ${await res.text()}`);
-  const data = await res.json();
-  setCachedFileId(data.id);
-  return toRemoteFile(data);
+  }, 'json', transferTimeout(bytes.byteLength));
+  if (!res.ok) throw new Error(`drive create failed: ${res.status} ${res.error}`);
+  setCachedFileId(res.body.id);
+  return toRemoteFile(res.body);
 }
 
 async function updateFile(fileId: string, bytes: Uint8Array): Promise<RemoteFile> {
   const headers = await authHeaders();
   headers.set('Content-Type', 'application/vnd.sqlite3');
-  const res = await timedFetch(`${UPLOAD_API}/files/${fileId}?uploadType=media&fields=${FILE_FIELDS}`, {
+  const res = await request<any>(`${UPLOAD_API}/files/${fileId}?uploadType=media&fields=${FILE_FIELDS}`, {
     method: 'PATCH',
     headers,
-    body: bytes,
-  }, transferTimeout(bytes.byteLength));
-  if (!res.ok) throw new Error(`drive update failed: ${res.status} ${await res.text()}`);
-  return toRemoteFile(await res.json());
+    body: bytes as BodyInit,
+  }, 'json', transferTimeout(bytes.byteLength));
+  if (!res.ok) throw new Error(`drive update failed: ${res.status} ${res.error}`);
+  return toRemoteFile(res.body);
 }
 
 /** Push the bytes to Drive. Returns the new file metadata so the caller
@@ -194,12 +211,12 @@ export async function deleteBlobFromDrive(): Promise<boolean> {
   const existing = await findFile();
   if (!existing) return false;
   const headers = await authHeaders();
-  const res = await timedFetch(`${DRIVE_API}/files/${existing.id}`, {
+  const res = await request(`${DRIVE_API}/files/${existing.id}`, {
     method: 'DELETE',
     headers,
-  });
+  }, 'none');
   if (!res.ok && res.status !== 404) {
-    throw new Error(`drive delete failed: ${res.status} ${await res.text()}`);
+    throw new Error(`drive delete failed: ${res.status} ${res.error}`);
   }
   setCachedFileId(null);
   return true;

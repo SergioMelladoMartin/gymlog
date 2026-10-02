@@ -19,7 +19,8 @@ import {
 } from './drive';
 import { ensureDriveAccess, hasAccount, hasValidToken, renewAccess } from './auth';
 import {
-  backupDelete, backupRead, backupWrite, conflictDelete, conflictRead, conflictWrite, hashBytes,
+  backupDelete, backupRead, backupWrite, conflictDelete, conflictDeleteAll, conflictList, conflictWrite,
+  hashBytes, type ConflictCopy,
 } from './localBackup';
 import { md5Hex } from './md5';
 
@@ -63,7 +64,7 @@ function isRemoteNewer(remote: RemoteMeta, stored: RemoteMeta | null): boolean {
 
 /** Persist a remote blob, update the sync watermark, and optionally hot-swap
  *  the in-memory DB (when the app is already running). */
-async function applyRemoteBytes(bytes: Uint8Array, meta: RemoteMeta, hotSwap: boolean): Promise<void> {
+async function applyRemoteBytes(bytes: Uint8Array, meta: RemoteFile, hotSwap: boolean): Promise<void> {
   // Swap before the first await so no mutation can land on the old DB.
   if (hotSwap && db) {
     db.close();
@@ -71,11 +72,19 @@ async function applyRemoteBytes(bytes: Uint8Array, meta: RemoteMeta, hotSwap: bo
     db.exec('PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;');
     migrateSchema(db);
   }
-  writeStoredMeta({ modifiedTime: meta.modifiedTime, size: meta.size });
-  setPending(false);
-  dirty = false;
-  setLastSyncAt(Date.now());
+  const seq = mutationSeq;
+  // Write OPFS *before* moving the watermark: if the page dies mid-write, the
+  // next launch still sees Drive as newer and pulls again, instead of taking
+  // the stale OPFS copy as current and later pushing it over Drive.
   await queuePersist(bytes);
+  if (meta.md5) rememberConfirmed(meta.md5);
+  writeStoredMeta({ modifiedTime: meta.modifiedTime, size: meta.size });
+  // Edits made on the new DB during the write still need uploading.
+  if (mutationSeq === seq) {
+    setPending(false);
+    dirty = false;
+  }
+  setLastSyncAt(Date.now());
   if (hotSwap) window.dispatchEvent(new CustomEvent('gymlog:db-swapped'));
 }
 
@@ -505,6 +514,7 @@ async function requestPersistentStorage(): Promise<void> {
 
 export async function loadDatabase(options: { seedUrl?: string } = {}): Promise<void> {
   if (status === 'loading' || status === 'ready') return;
+  syncHalted = false;
   lastLoadOptions = options;
   setStatus('loading');
   try {
@@ -612,12 +622,12 @@ export async function loadDatabase(options: { seedUrl?: string } = {}): Promise<
     // and Drive/other devices would never get the newer shape.
     if (migrated) {
       try { await persistLocalBytes(serialize(db)); } catch (e) { console.error('[load] persist migrated bytes', e); }
-      if (hasAccount()) scheduleSync(true).catch(() => {});
-    } else if (hasAccount()) {
-      // Background reconcile: pull another device's changes, or push edits
-      // left pending by a previous session.
-      void requestSync();
     }
+    // Background reconcile: pull another device's changes, or push edits
+    // left pending by a previous session. A schema migration alone is not an
+    // edit: every device migrates on load, so it isn't marked as pending (it
+    // would otherwise be parked as a bogus conflict when Drive moved on).
+    if (hasAccount()) void requestSync();
   } catch (e) {
     console.error('loadDatabase', e);
     setStatus('error', e);
@@ -685,6 +695,13 @@ export async function importBytes(bytes: Uint8Array): Promise<void> {
   // the previous DB intact.
   if (db) { db.close(); db = null; }
   db = newDb;
+  // Mark the import as unsynced in the same tick as the swap, so a sync round
+  // already downloading can't treat it as clean and replace it with Drive's.
+  syncHalted = false;
+  dirty = true;
+  mutationSeq++;
+  setPending(true);
+  setForcePush(true);
 
   // Persist the migrated bytes, not the originals, so future loads don't
   // have to re-migrate.
@@ -697,15 +714,11 @@ export async function importBytes(bytes: Uint8Array): Promise<void> {
   }
   setStatus('ready');
 
-  // Treat the just-imported bytes as unpushed local edits: mark the pending
-  // bit and push to Drive. This is critical — without `pending`, a caller
-  // that navigates away before the push lands (LoginView does an immediate
-  // window.location.replace) leaves the OPFS copy as the only source of
-  // truth, and the next load's "remote newer?" check would pull the older
-  // (often empty, freshly-seeded) Drive file and clobber the import. With
-  // the bit set, the next load instead self-heals by pushing OPFS up first.
-  // We also await the push so the data reaches Drive before any redirect.
-  setPending(true);
+  // The import was marked pending + force-push at the swap above: it must
+  // replace Drive's copy (sync model, point 6), even if the page navigates
+  // away before the upload lands (LoginView does an immediate
+  // window.location.replace) and the push only happens on the next load.
+  // We also await the push so the data usually reaches Drive first.
   try {
     await scheduleSync(true);
   } catch (e) {
@@ -736,11 +749,15 @@ export function getDb(): Database {
 //   5. If another device really did push while this one had unsynced edits,
 //      Drive's copy wins (it's what every other device sees) and the local
 //      bytes are parked as a conflict copy that Settings can restore.
+//   6. An explicit import or restore is the user saying "this is my data":
+//      the next push replaces Drive's copy whatever it holds.
 
 export type SyncState = 'idle' | 'dirty' | 'syncing' | 'offline' | 'error';
 const LS_LAST_SYNC = 'gymlog-last-sync';
 const LS_PENDING = 'gymlog-sync-pending';
-const LS_PUSHED_MD5 = 'gymlog-pushed-md5';
+const LS_ATTEMPTED_MD5 = 'gymlog-pushed-md5';
+const LS_CONFIRMED_MD5 = 'gymlog-confirmed-md5';
+const LS_FORCE_PUSH = 'gymlog-force-push';
 const PUSH_DEBOUNCE_MS = 1_500;
 const PERSIST_DEBOUNCE_MS = 250;
 const MAX_RETRY_DELAY_MS = 60_000;
@@ -754,6 +771,8 @@ let persistTimer: ReturnType<typeof setTimeout> | null = null;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
 let retryCount = 0;
 let persistChain: Promise<void> = Promise.resolve();
+// Set by wipe/sign-out so no sync round can run (or re-upload) meanwhile.
+let syncHalted = false;
 let syncState: SyncState = 'idle';
 let lastSyncAt: number | null = (() => {
   try {
@@ -792,18 +811,39 @@ function isOffline(): boolean {
   return typeof navigator !== 'undefined' && navigator.onLine === false;
 }
 
-function readPushedHashes(): string[] {
-  try { return JSON.parse(localStorage.getItem(LS_PUSHED_MD5) ?? '[]'); } catch { return []; }
+// MD5 bookkeeping, newest last:
+//   • attempted: every upload this device started. A remote file with one of
+//     these hashes is our own upload, even if its response never arrived.
+//   • confirmed: versions known to be on Drive (upload acknowledged, seen on
+//     Drive, or downloaded). A local DB with one of these hashes has nothing
+//     unsynced. An attempt alone doesn't count: it may never have landed.
+function readHashes(key: string): string[] {
+  try { return JSON.parse(localStorage.getItem(key) ?? '[]'); } catch { return []; }
 }
-function rememberPushedHash(md5: string): void {
+function addHash(key: string, md5: string): void {
   try {
-    const list = readPushedHashes().filter((h) => h !== md5);
+    const list = readHashes(key).filter((h) => h !== md5);
     list.push(md5);
-    localStorage.setItem(LS_PUSHED_MD5, JSON.stringify(list.slice(-20)));
+    localStorage.setItem(key, JSON.stringify(list.slice(-20)));
   } catch {}
 }
-function isOwnPush(remote: RemoteFile): boolean {
-  return !!remote.md5 && readPushedHashes().includes(remote.md5);
+function rememberAttempt(md5: string): void { addHash(LS_ATTEMPTED_MD5, md5); }
+function rememberConfirmed(md5: string): void { addHash(LS_CONFIRMED_MD5, md5); }
+function isOwnUpload(md5: string | null): boolean {
+  return !!md5 && (readHashes(LS_ATTEMPTED_MD5).includes(md5) || readHashes(LS_CONFIRMED_MD5).includes(md5));
+}
+function isOnDrive(md5: string): boolean {
+  return readHashes(LS_CONFIRMED_MD5).includes(md5);
+}
+
+function isForcePush(): boolean {
+  try { return localStorage.getItem(LS_FORCE_PUSH) === '1'; } catch { return false; }
+}
+function setForcePush(v: boolean): void {
+  try {
+    if (v) localStorage.setItem(LS_FORCE_PUSH, '1');
+    else localStorage.removeItem(LS_FORCE_PUSH);
+  } catch {}
 }
 
 /** Serialize OPFS writes: overlapping `createWritable()` calls on the same
@@ -862,6 +902,7 @@ function clearRetry() {
 /** Run a sync round, or join the one in progress (which then runs again). */
 function requestSync(): Promise<void> {
   if (pushTimer) { clearTimeout(pushTimer); pushTimer = null; }
+  if (syncHalted) return Promise.resolve();
   if (syncLoop) { rerunSync = true; return syncLoop; }
   syncLoop = (async () => {
     try {
@@ -879,7 +920,7 @@ function requestSync(): Promise<void> {
 
 /** One reconcile with Drive. Resolves false when it couldn't finish. */
 async function syncOnce(): Promise<boolean> {
-  if (!db || !hasAccount()) return true;
+  if (syncHalted || !db || !hasAccount()) return true;
   if (isOffline()) {
     if (wantsPush()) { setSyncState('offline'); scheduleRetry(); }
     return false;
@@ -897,16 +938,26 @@ async function syncOnce(): Promise<boolean> {
     }
 
     const remote = await getRemoteMeta();
-    if (remote && isRemoteNewer(remote, readStoredMeta())) {
-      if (isOwnPush(remote)) {
+    if (syncHalted || !db) return true;
+    if (remote && !isForcePush() && isRemoteNewer(remote, readStoredMeta())) {
+      if (isOwnUpload(remote.md5)) {
         // An earlier upload of ours landed but we never saw the response.
+        rememberConfirmed(remote.md5!);
         writeStoredMeta({ modifiedTime: remote.modifiedTime, size: remote.size });
       } else {
         const buf = await pullBlobFromDrive(remote);
+        if (syncHalted || !db) return true;
         if (!buf) throw new Error('drive download returned nothing');
-        await parkLocalEditsIfAny();
-        // No await between the check above and the swap inside
-        // applyRemoteBytes, so no edit can slip in and be lost.
+        // An import/restore landed while we were downloading: it replaces
+        // Drive's copy, so drop this download and go push it instead.
+        if (isForcePush()) { rerunSync = true; return true; }
+        if (!(await parkLocalEditsIfAny())) {
+          // Edits kept landing while we saved them; try again shortly.
+          scheduleRetry();
+          return false;
+        }
+        // parkLocalEditsIfAny resolved with no await left before the swap
+        // at the top of applyRemoteBytes, so no edit can slip in and be lost.
         await applyRemoteBytes(new Uint8Array(buf), remote, true);
         clearRetry();
         setSyncState('idle');
@@ -927,17 +978,21 @@ async function syncOnce(): Promise<boolean> {
     const md5 = md5Hex(bytes);
     if (remote && remote.md5 === md5) {
       // Drive already holds exactly these bytes (e.g. the lost-response case).
+      rememberConfirmed(md5);
       writeStoredMeta({ modifiedTime: remote.modifiedTime, size: remote.size });
     } else {
       void queuePersist(bytes).catch(() => {});
-      rememberPushedHash(md5);
+      if (syncHalted) return true;
+      rememberAttempt(md5);
       const meta = await pushBlobToDrive(bytes);
       if (meta.size !== bytes.byteLength) {
         throw new Error('La subida a Drive no se verificó correctamente');
       }
+      rememberConfirmed(md5);
       writeStoredMeta({ modifiedTime: meta.modifiedTime, size: meta.size });
     }
     setLastSyncAt(Date.now());
+    setForcePush(false);
     // Only clear the pending bit if no new mutation came in mid-flight.
     if (mutationSeq === pushSeq) setPending(false);
     clearRetry();
@@ -960,15 +1015,28 @@ async function syncOnce(): Promise<boolean> {
 }
 
 /** Before Drive's copy replaces the local DB, keep any unsynced local edits
- *  as a conflict copy. Loops in case an edit lands while we're saving. */
-async function parkLocalEditsIfAny(): Promise<void> {
-  for (let i = 0; i < 3 && wantsPush() && db; i++) {
+ *  as a conflict copy. Resolves true when the current local state is safe
+ *  (parked, or nothing to park) and false if edits kept landing meanwhile.
+ *  Throws if the copy can't be stored, so the caller never swaps. */
+async function parkLocalEditsIfAny(): Promise<boolean> {
+  let parkedId: string | null = null;
+  for (let i = 0; i < 5; i++) {
+    if (!db || !wantsPush()) return true;
     const seq = mutationSeq;
-    await conflictWrite(serialize(db));
-    console.warn('[sync] another device updated Drive; local edits saved as a conflict copy');
-    window.dispatchEvent(new CustomEvent('gymlog:sync-conflict'));
-    if (mutationSeq === seq) return;
+    const local = serialize(db);
+    // Same bytes as a version already on Drive: nothing unsynced to keep.
+    if (isOnDrive(md5Hex(local))) return true;
+    const id = await conflictWrite(local);
+    if (parkedId) await conflictDelete(parkedId); // superseded by the newer copy
+    parkedId = id;
+    if (mutationSeq === seq) {
+      console.warn('[sync] another device updated Drive; local edits saved as a conflict copy');
+      window.dispatchEvent(new CustomEvent('gymlog:sync-conflict'));
+      return true;
+    }
   }
+  if (parkedId) window.dispatchEvent(new CustomEvent('gymlog:sync-conflict'));
+  return false;
 }
 
 export async function checkForRemoteUpdates(): Promise<void> {
@@ -1009,23 +1077,23 @@ export async function forceSync(): Promise<void> {
   return requestSync();
 }
 
-// ── conflict copy (see sync model, point 5) ───────────────────────────
+// ── conflict copies (see sync model, point 5) ─────────────────────────
 
-export async function getConflictCopy(): Promise<{ bytes: Uint8Array; at: number } | null> {
-  return conflictRead();
+export async function getConflictCopies(): Promise<ConflictCopy[]> {
+  return conflictList();
 }
 
-export async function discardConflictCopy(): Promise<void> {
-  await conflictDelete();
+export async function discardConflictCopy(id: string): Promise<void> {
+  await conflictDelete(id);
   window.dispatchEvent(new CustomEvent('gymlog:sync-conflict'));
 }
 
-/** Make the parked local copy the current DB again and push it to Drive. */
-export async function restoreConflictCopy(): Promise<void> {
-  const copy = await conflictRead();
+/** Make a parked copy the current DB again and upload it over Drive's. */
+export async function restoreConflictCopy(id: string): Promise<void> {
+  const copy = (await conflictList()).find((c) => c.id === id);
   if (!copy) return;
   await importBytes(copy.bytes);
-  await discardConflictCopy();
+  await discardConflictCopy(id);
 }
 
 if (typeof window !== 'undefined') {
@@ -1073,42 +1141,59 @@ if (typeof window !== 'undefined') {
   }, 120_000);
 }
 
-function resetSyncRuntime() {
+/** Stop all sync activity and wait for a round already in flight, so it
+ *  can't re-upload data that is about to be deleted. */
+async function haltSync(): Promise<void> {
+  syncHalted = true;
   if (pushTimer) { clearTimeout(pushTimer); pushTimer = null; }
   if (persistTimer) { clearTimeout(persistTimer); persistTimer = null; }
   clearRetry();
-  try { localStorage.removeItem(LS_PUSHED_MD5); } catch {}
+  if (syncLoop) await syncLoop.catch(() => {});
+}
+
+function clearSyncMarkers() {
+  try {
+    localStorage.removeItem(LS_ATTEMPTED_MD5);
+    localStorage.removeItem(LS_CONFIRMED_MD5);
+  } catch {}
+  setForcePush(false);
 }
 
 /** Destructive — remove the gymlog.fitnotes backup from the user's Drive
  *  AND the local OPFS copy, then close the in-memory DB. The caller is
  *  expected to reload the page so a fresh empty DB is seeded. */
 export async function wipeAll(): Promise<void> {
-  try { await deleteBlobFromDrive(); } catch (e) { console.error('[wipe] drive', e); throw e; }
-  if (db) { db.close(); db = null; }
-  await opfsDelete();
-  await backupDelete();
-  writeStoredMeta(null);
-  try { localStorage.removeItem(LS_LOCAL_HASH); } catch {}
-  setLastSyncAt(null);
-  setPending(false);
-  dirty = false;
-  resetSyncRuntime();
-  setSyncState('idle');
-  setStatus('idle');
+  await haltSync();
+  try {
+    await deleteBlobFromDrive();
+  } catch (e) {
+    console.error('[wipe] drive', e);
+    syncHalted = false; // nothing was wiped; keep syncing
+    void requestSync();
+    throw e;
+  }
+  await clearLocalData();
 }
 
 // ── teardown on sign-out ──────────────────────────────────────────────
 export async function resetLocal(): Promise<void> {
+  await haltSync();
+  await clearLocalData();
+}
+
+async function clearLocalData(): Promise<void> {
   if (db) { db.close(); db = null; }
   await opfsDelete();
   await backupDelete();
+  // Parked copies belong to this account's data too: never leave them for
+  // whoever signs in next.
+  await conflictDeleteAll();
   writeStoredMeta(null);
   try { localStorage.removeItem(LS_LOCAL_HASH); } catch {}
   setLastSyncAt(null);
   setPending(false);
   dirty = false;
-  resetSyncRuntime();
+  clearSyncMarkers();
   setSyncState('idle');
   setStatus('idle');
 }

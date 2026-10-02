@@ -85,43 +85,74 @@ export async function backupDelete(): Promise<void> {
   } catch {}
 }
 
-// ── conflict copy ──────────────────────────────────────────────────────
+// ── conflict copies ────────────────────────────────────────────────────
 // When another device pushed to Drive while this one still had unsynced
 // edits, the remote copy wins (it's the one every other device sees) but the
 // local bytes are parked here instead of being dropped, so they can be
-// downloaded or restored from Settings.
+// downloaded or restored from Settings. Each conflict gets its own entry, so
+// a second conflict never overwrites a copy the user hasn't looked at yet.
 
-const CONFLICT_KEY = 'conflict';
+const CONFLICT_PREFIX = 'conflict:';
 
-export async function conflictWrite(bytes: Uint8Array): Promise<void> {
-  if (typeof indexedDB === 'undefined') return;
+export type ConflictCopy = { id: string; bytes: Uint8Array; at: number };
+
+/** Throws when the copy can't be stored: the caller must then keep the local
+ *  data instead of replacing it with Drive's. */
+export async function conflictWrite(bytes: Uint8Array): Promise<string> {
+  if (typeof indexedDB === 'undefined') throw new Error('IndexedDB no disponible: no se puede apartar la copia local');
+  const at = Date.now();
+  const id = `${CONFLICT_PREFIX}${at}-${Math.random().toString(36).slice(2, 8)}`;
   const db = await openDb();
-  await idbPut(db, CONFLICT_KEY, { bytes, hash: await hashBytes(bytes), at: Date.now() });
-  db.close();
+  try {
+    await idbPut(db, id, { bytes, hash: await hashBytes(bytes), at });
+  } finally {
+    db.close();
+  }
+  return id;
 }
 
-export async function conflictRead(): Promise<{ bytes: Uint8Array; at: number } | null> {
-  if (typeof indexedDB === 'undefined') return null;
+/** All parked copies, newest first. */
+export async function conflictList(): Promise<ConflictCopy[]> {
+  if (typeof indexedDB === 'undefined') return [];
   try {
     const db = await openDb();
-    const row = await idbGet<BackupRow>(db, CONFLICT_KEY);
+    const rows = await new Promise<ConflictCopy[]>((resolve, reject) => {
+      const out: ConflictCopy[] = [];
+      const tx = db.transaction(STORE, 'readonly');
+      const req = tx.objectStore(STORE).openCursor();
+      req.onsuccess = () => {
+        const cur = req.result;
+        if (!cur) return resolve(out);
+        const key = String(cur.key);
+        if (key.startsWith(CONFLICT_PREFIX)) {
+          const row = cur.value as BackupRow;
+          out.push({ id: key, bytes: row.bytes, at: row.at });
+        }
+        cur.continue();
+      };
+      req.onerror = () => reject(req.error);
+    });
     db.close();
-    return row ? { bytes: row.bytes, at: row.at } : null;
+    return rows.sort((a, b) => b.at - a.at);
   } catch {
-    return null;
+    return [];
   }
 }
 
-export async function conflictDelete(): Promise<void> {
+export async function conflictDelete(id: string): Promise<void> {
   if (typeof indexedDB === 'undefined') return;
   try {
     const db = await openDb();
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE, 'readwrite');
-      tx.objectStore(STORE).delete(CONFLICT_KEY);
+      tx.objectStore(STORE).delete(id);
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
     db.close();
   } catch {}
+}
+
+export async function conflictDeleteAll(): Promise<void> {
+  for (const c of await conflictList()) await conflictDelete(c.id);
 }
