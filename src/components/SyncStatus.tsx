@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { forceSync, getConflictCopies, getSyncInfo, onSyncChange, type SyncState } from '../lib/sqlite';
+import { forceSync, getConflictCount, getSyncInfo, onSyncChange, type SyncState } from '../lib/sqlite';
 import { getAuthStatus, onAuthChange, renewAccess, type AuthStatus } from '../lib/auth';
 import { hapticSuccess } from '../lib/haptics';
 import { useT } from '../hooks/useT';
@@ -27,7 +27,7 @@ export default function SyncStatus() {
   useEffect(() => onAuthChange(setAuthStatus), []);
 
   useEffect(() => {
-    const refresh = () => { void getConflictCopies().then((list) => setHasConflict(list.length > 0)); };
+    const refresh = () => { void getConflictCount().then((n) => setHasConflict(n > 0)); };
     refresh();
     window.addEventListener('gymlog:sync-conflict', refresh);
     return () => window.removeEventListener('gymlog:sync-conflict', refresh);
@@ -70,13 +70,9 @@ export default function SyncStatus() {
     label = t('sync.syncing');
     icon = <SpinIcon />;
     aria = t('sync.syncing');
-  } else if (tokenExpired && state !== 'dirty') {
-    tone = 'text-amber-400';
-    label = t('sync.tokenExpired');
-    icon = <KeyIcon />;
-    aria = `${t('sync.tokenExpired')} — ${t('sync.tapToRenew')}`;
-  } else if (waiting) {
+  } else if (waiting && !(online && tokenExpired)) {
     // Not an error: the workout is safe on the device and uploads by itself.
+    // With no signal this wins over "renovar acceso": a renew can't work.
     tone = 'text-amber-400';
     label = t('sync.pending');
     icon = <CloudOffIcon />;
@@ -86,6 +82,11 @@ export default function SyncStatus() {
     label = t('sync.offline');
     icon = <CloudOffIcon />;
     aria = t('sync.offline');
+  } else if (tokenExpired && state !== 'dirty') {
+    tone = 'text-amber-400';
+    label = t('sync.tokenExpired');
+    icon = <KeyIcon />;
+    aria = `${t('sync.tokenExpired')} — ${t('sync.tapToRenew')}`;
   } else if (state === 'dirty') {
     tone = 'text-amber-400';
     label = t('sync.dirty');
@@ -104,7 +105,7 @@ export default function SyncStatus() {
   }
 
   async function handleClick() {
-    if (tokenExpired) {
+    if (tokenExpired && online) {
       const ok = await renewAccess(true);
       if (ok) await forceSync().catch(() => {});
       return;

@@ -93,6 +93,7 @@ export async function backupDelete(): Promise<void> {
 // a second conflict never overwrites a copy the user hasn't looked at yet.
 
 const CONFLICT_PREFIX = 'conflict:';
+const CONFLICT_RANGE = () => IDBKeyRange.bound(CONFLICT_PREFIX, `${CONFLICT_PREFIX}\uffff`);
 
 export type ConflictCopy = { id: string; bytes: Uint8Array; at: number };
 
@@ -119,15 +120,12 @@ export async function conflictList(): Promise<ConflictCopy[]> {
     const rows = await new Promise<ConflictCopy[]>((resolve, reject) => {
       const out: ConflictCopy[] = [];
       const tx = db.transaction(STORE, 'readonly');
-      const req = tx.objectStore(STORE).openCursor();
+      const req = tx.objectStore(STORE).openCursor(CONFLICT_RANGE());
       req.onsuccess = () => {
         const cur = req.result;
         if (!cur) return resolve(out);
-        const key = String(cur.key);
-        if (key.startsWith(CONFLICT_PREFIX)) {
-          const row = cur.value as BackupRow;
-          out.push({ id: key, bytes: row.bytes, at: row.at });
-        }
+        const row = cur.value as BackupRow;
+        out.push({ id: String(cur.key), bytes: row.bytes, at: row.at });
         cur.continue();
       };
       req.onerror = () => reject(req.error);
@@ -136,6 +134,23 @@ export async function conflictList(): Promise<ConflictCopy[]> {
     return rows.sort((a, b) => b.at - a.at);
   } catch {
     return [];
+  }
+}
+
+/** How many copies are parked, without loading their bytes. */
+export async function conflictCount(): Promise<number> {
+  if (typeof indexedDB === 'undefined') return 0;
+  try {
+    const db = await openDb();
+    const n = await new Promise<number>((resolve, reject) => {
+      const req = db.transaction(STORE, 'readonly').objectStore(STORE).count(CONFLICT_RANGE());
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    db.close();
+    return n;
+  } catch {
+    return 0;
   }
 }
 

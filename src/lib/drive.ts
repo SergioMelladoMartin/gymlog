@@ -1,7 +1,7 @@
 // Google Drive appdata helpers for the raw FitNotes SQLite file.
 // Keeps a single `gymlog.fitnotes` blob in the hidden appData folder.
 
-import { getAccessToken, reconsent } from './auth';
+import { dropToken, getAccessToken, reconsent } from './auth';
 
 const FILE_NAME = 'gymlog.fitnotes';
 const DRIVE_API = 'https://www.googleapis.com/drive/v3';
@@ -66,6 +66,9 @@ async function request<T = unknown>(
   const t = setTimeout(() => ac.abort(), timeoutMs);
   try {
     const res = await fetch(input, { ...init, signal: ac.signal });
+    // A token Google revoked can still look valid locally: drop it so the
+    // next round refreshes it (or the pill offers "renovar acceso").
+    if (res.status === 401) dropToken();
     if (!res.ok) {
       return { ok: false, status: res.status, body: null as T, error: await res.text().catch(() => '') };
     }

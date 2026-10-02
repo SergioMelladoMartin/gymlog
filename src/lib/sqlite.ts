@@ -19,7 +19,7 @@ import {
 } from './drive';
 import { ensureDriveAccess, hasAccount, hasValidToken, renewAccess } from './auth';
 import {
-  backupDelete, backupRead, backupWrite, conflictDelete, conflictDeleteAll, conflictList, conflictWrite,
+  backupDelete, backupRead, backupWrite, conflictCount, conflictDelete, conflictDeleteAll, conflictList, conflictWrite,
   hashBytes, type ConflictCopy,
 } from './localBackup';
 import { md5Hex } from './md5';
@@ -52,7 +52,7 @@ async function writeLocalHash(bytes: Uint8Array): Promise<void> {
 /** Persist bytes to OPFS + IndexedDB mirror + content hash. */
 async function persistLocalBytes(bytes: Uint8Array): Promise<void> {
   await opfsWrite(bytes);
-  void backupWrite(bytes);
+  await backupWrite(bytes); // never throws; awaited so wipe/sign-out can wait for it
   await writeLocalHash(bytes);
 }
 
@@ -702,12 +702,14 @@ export async function importBytes(bytes: Uint8Array): Promise<void> {
   mutationSeq++;
   setPending(true);
   setForcePush(true);
+  forceSince = mutationSeq;
 
   // Persist the migrated bytes, not the originals, so future loads don't
   // have to re-migrate.
   try {
-    const migratedBytes = serialize(db);
-    await persistLocalBytes(migratedBytes);
+    // Through the queue, so a write of the previous DB still in flight can't
+    // land after this one and leave OPFS holding the pre-import data.
+    await queuePersist(serialize(db));
   } catch (e: any) {
     console.error('[import] persist failed', e);
     // Don't bail — the in-memory DB is already usable.
@@ -773,6 +775,9 @@ let retryCount = 0;
 let persistChain: Promise<void> = Promise.resolve();
 // Set by wipe/sign-out so no sync round can run (or re-upload) meanwhile.
 let syncHalted = false;
+// mutationSeq when the pending import/restore was made: only a push of bytes
+// serialized at or after it fulfils the "replace Drive" request.
+let forceSince = 0;
 let syncState: SyncState = 'idle';
 let lastSyncAt: number | null = (() => {
   try {
@@ -812,8 +817,10 @@ function isOffline(): boolean {
 }
 
 // MD5 bookkeeping, newest last:
-//   • attempted: every upload this device started. A remote file with one of
-//     these hashes is our own upload, even if its response never arrived.
+//   • attempted: uploads started since the last confirmed sync. A remote file
+//     with one of these hashes is our own upload, even if its response never
+//     arrived. Cleared whenever we're known to be in sync with Drive, so an
+//     old version restored elsewhere is never mistaken for ours.
 //   • confirmed: versions known to be on Drive (upload acknowledged, seen on
 //     Drive, or downloaded). A local DB with one of these hashes has nothing
 //     unsynced. An attempt alone doesn't count: it may never have landed.
@@ -828,9 +835,12 @@ function addHash(key: string, md5: string): void {
   } catch {}
 }
 function rememberAttempt(md5: string): void { addHash(LS_ATTEMPTED_MD5, md5); }
-function rememberConfirmed(md5: string): void { addHash(LS_CONFIRMED_MD5, md5); }
+function rememberConfirmed(md5: string): void {
+  addHash(LS_CONFIRMED_MD5, md5);
+  try { localStorage.removeItem(LS_ATTEMPTED_MD5); } catch {}
+}
 function isOwnUpload(md5: string | null): boolean {
-  return !!md5 && (readHashes(LS_ATTEMPTED_MD5).includes(md5) || readHashes(LS_CONFIRMED_MD5).includes(md5));
+  return !!md5 && readHashes(LS_ATTEMPTED_MD5).includes(md5);
 }
 function isOnDrive(md5: string): boolean {
   return readHashes(LS_CONFIRMED_MD5).includes(md5);
@@ -981,7 +991,6 @@ async function syncOnce(): Promise<boolean> {
       rememberConfirmed(md5);
       writeStoredMeta({ modifiedTime: remote.modifiedTime, size: remote.size });
     } else {
-      void queuePersist(bytes).catch(() => {});
       if (syncHalted) return true;
       rememberAttempt(md5);
       const meta = await pushBlobToDrive(bytes);
@@ -992,7 +1001,7 @@ async function syncOnce(): Promise<boolean> {
       writeStoredMeta({ modifiedTime: meta.modifiedTime, size: meta.size });
     }
     setLastSyncAt(Date.now());
-    setForcePush(false);
+    if (pushSeq >= forceSince) setForcePush(false);
     // Only clear the pending bit if no new mutation came in mid-flight.
     if (mutationSeq === pushSeq) setPending(false);
     clearRetry();
@@ -1035,7 +1044,8 @@ async function parkLocalEditsIfAny(): Promise<boolean> {
       return true;
     }
   }
-  if (parkedId) window.dispatchEvent(new CustomEvent('gymlog:sync-conflict'));
+  // Not swapping this round: drop the partial copy, the retry parks afresh.
+  if (parkedId) await conflictDelete(parkedId);
   return false;
 }
 
@@ -1069,18 +1079,28 @@ export async function flushNow(): Promise<void> {
  *  cookies), this is also our chance to prompt from inside the gesture. */
 export async function forceSync(): Promise<void> {
   if (!hasAccount()) return;
+  clearRetry();
+  // No signal: a token popup can't work, just try (and keep retrying).
+  if (isOffline()) return requestSync();
   if (!hasValidToken()) {
     const renewed = await renewAccess(true);
     if (!renewed) return;
   }
-  clearRetry();
-  return requestSync();
+  await requestSync();
+  // Drive rejected the token (a 401 drops it): re-auth inside this tap.
+  if (syncState === 'error' && !hasValidToken() && (await renewAccess(true))) {
+    await requestSync();
+  }
 }
 
 // ── conflict copies (see sync model, point 5) ─────────────────────────
 
 export async function getConflictCopies(): Promise<ConflictCopy[]> {
   return conflictList();
+}
+
+export async function getConflictCount(): Promise<number> {
+  return conflictCount();
 }
 
 export async function discardConflictCopy(id: string): Promise<void> {
@@ -1149,6 +1169,7 @@ async function haltSync(): Promise<void> {
   if (persistTimer) { clearTimeout(persistTimer); persistTimer = null; }
   clearRetry();
   if (syncLoop) await syncLoop.catch(() => {});
+  await persistChain; // let queued OPFS/mirror writes land before deleting
 }
 
 function clearSyncMarkers() {

@@ -313,6 +313,17 @@ export async function getAccessToken(interactive = false): Promise<string> {
   ]);
 }
 
+/** Forget the access token (Drive answered 401: revoked or invalid) while
+ *  keeping the profile, so the next call refreshes it instead of reusing it. */
+export function dropToken(): void {
+  memoryToken = null;
+  const profile = getCurrentUser();
+  try {
+    if (profile) localStorage.setItem(STORAGE_KEY, JSON.stringify({ token: '', expiresAt: 0, profile }));
+  } catch {}
+  notifyAuthChange();
+}
+
 /** Force a re-consent flow (used after a 403 from Drive). Preserves profile. */
 export async function reconsent(): Promise<string> {
   const profile = getCurrentUser();
