@@ -84,3 +84,44 @@ export async function backupDelete(): Promise<void> {
     db.close();
   } catch {}
 }
+
+// ── conflict copy ──────────────────────────────────────────────────────
+// When another device pushed to Drive while this one still had unsynced
+// edits, the remote copy wins (it's the one every other device sees) but the
+// local bytes are parked here instead of being dropped, so they can be
+// downloaded or restored from Settings.
+
+const CONFLICT_KEY = 'conflict';
+
+export async function conflictWrite(bytes: Uint8Array): Promise<void> {
+  if (typeof indexedDB === 'undefined') return;
+  const db = await openDb();
+  await idbPut(db, CONFLICT_KEY, { bytes, hash: await hashBytes(bytes), at: Date.now() });
+  db.close();
+}
+
+export async function conflictRead(): Promise<{ bytes: Uint8Array; at: number } | null> {
+  if (typeof indexedDB === 'undefined') return null;
+  try {
+    const db = await openDb();
+    const row = await idbGet<BackupRow>(db, CONFLICT_KEY);
+    db.close();
+    return row ? { bytes: row.bytes, at: row.at } : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function conflictDelete(): Promise<void> {
+  if (typeof indexedDB === 'undefined') return;
+  try {
+    const db = await openDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readwrite');
+      tx.objectStore(STORE).delete(CONFLICT_KEY);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  } catch {}
+}

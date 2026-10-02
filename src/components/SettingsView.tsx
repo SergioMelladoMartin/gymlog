@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { signOut } from '../lib/auth';
-import { exportBytes, importBytes, resetLocal, wipeAll } from '../lib/sqlite';
+import {
+  discardConflictCopy, exportBytes, getConflictCopy, importBytes, resetLocal, restoreConflictCopy, wipeAll,
+} from '../lib/sqlite';
 import { useT } from '../hooks/useT';
 import { setLang, type Lang } from '../lib/i18n';
 import { THEMES, themeColor, type ThemeMode } from '../lib/locale';
@@ -29,6 +31,15 @@ export default function SettingsView() {
   const [importing, setImporting] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [wiping, setWiping] = useState(false);
+  const [conflict, setConflict] = useState<{ bytes: Uint8Array; at: number } | null>(null);
+  const [restoring, setRestoring] = useState(false);
+
+  useEffect(() => {
+    const refresh = () => { void getConflictCopy().then(setConflict); };
+    refresh();
+    window.addEventListener('gymlog:sync-conflict', refresh);
+    return () => window.removeEventListener('gymlog:sync-conflict', refresh);
+  }, []);
 
   useEffect(() => {
     const stored = document.documentElement.getAttribute('data-theme') as ThemeMode | null;
@@ -101,22 +112,37 @@ export default function SettingsView() {
     }
   }
 
+  function downloadBytes(bytes: Uint8Array, name: string) {
+    const blob = new Blob([bytes as BlobPart], { type: 'application/vnd.sqlite3' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      a.remove();
+      URL.revokeObjectURL(url);
+    }, 0);
+  }
+
+  async function handleRestoreConflict() {
+    if (!confirm(t('settings.conflictRestoreConfirm'))) return;
+    setRestoring(true);
+    try {
+      await restoreConflictCopy();
+      window.location.reload();
+    } catch (e: any) {
+      alert(e?.message ?? String(e));
+      setRestoring(false);
+    }
+  }
+
   function handleExport() {
     setExporting(true);
     try {
-      const bytes = exportBytes();
-      const blob = new Blob([bytes], { type: 'application/vnd.sqlite3' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
       const stamp = new Date().toISOString().slice(0, 10);
-      a.href = url;
-      a.download = `gymlog-${stamp}.fitnotes`;
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(() => {
-        a.remove();
-        URL.revokeObjectURL(url);
-      }, 0);
+      downloadBytes(exportBytes(), `gymlog-${stamp}.fitnotes`);
     } catch (e: any) {
       alert(e?.message ?? t('common.errorExport'));
     } finally {
@@ -265,6 +291,40 @@ export default function SettingsView() {
               <li>{t('settings.installDesktop2')}</li>
             </ol>
           )}
+        </section>
+      )}
+
+      {/* Local copy set aside by a sync conflict */}
+      {conflict && (
+        <section id="sync-conflict" className="card mb-4 border-amber-400/40 bg-amber-400/5 p-4">
+          <div className="section-title mb-2 text-amber-400">{t('settings.conflictTitle')}</div>
+          <p className="mb-3 text-sm text-muted">
+            {t('settings.conflictBlurb', { date: new Date(conflict.at).toLocaleString() })}
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => { void handleRestoreConflict(); }}
+              disabled={restoring}
+              className="btn-accent col-span-2 rounded-lg px-3 py-2.5 text-sm font-semibold transition disabled:opacity-40"
+            >
+              {t('settings.conflictRestore')}
+            </button>
+            <button
+              type="button"
+              onClick={() => downloadBytes(conflict.bytes, `gymlog-conflicto-${new Date(conflict.at).toISOString().slice(0, 10)}.fitnotes`)}
+              className="rounded-lg border border-border bg-elevated/60 px-3 py-2.5 text-sm font-medium transition hover:bg-elevated"
+            >
+              {t('settings.conflictDownload')}
+            </button>
+            <button
+              type="button"
+              onClick={() => { void discardConflictCopy(); }}
+              className="rounded-lg border border-border bg-elevated/60 px-3 py-2.5 text-sm font-medium text-muted transition hover:bg-elevated"
+            >
+              {t('settings.conflictDiscard')}
+            </button>
+          </div>
         </section>
       )}
 

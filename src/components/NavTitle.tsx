@@ -1,6 +1,6 @@
 import { useT } from '../hooks/useT';
 
-type NavKey = 'today' | 'calendar' | 'diary' | 'stats' | 'exercises' | 'login';
+type NavKey = 'today' | 'calendar' | 'diary' | 'stats' | 'exercises' | 'profile' | 'settings' | 'login';
 
 const NAV_KEYS: Record<NavKey, string> = {
   today: 'nav.today',
@@ -8,6 +8,8 @@ const NAV_KEYS: Record<NavKey, string> = {
   diary: 'nav.diary',
   exercises: 'nav.exercises',
   stats: 'nav.stats',
+  profile: 'nav.profile',
+  settings: 'nav.settings',
   login: 'nav.login',
 };
 

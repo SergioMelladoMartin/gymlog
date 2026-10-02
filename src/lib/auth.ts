@@ -89,7 +89,14 @@ function loadGis(): Promise<void> {
     s.async = true;
     s.defer = true;
     s.onload = () => resolve();
-    s.onerror = () => reject(new Error('Failed to load Google Identity Services'));
+    s.onerror = () => {
+      // Forget the failure (and the dead tag) so the next attempt retries.
+      // Otherwise one launch without signal would break token refresh, and
+      // with it every Drive sync, until the app was reloaded.
+      s.remove();
+      gisLoaded = null;
+      reject(new Error('Failed to load Google Identity Services'));
+    };
     document.head.appendChild(s);
   });
   return gisLoaded;
@@ -227,6 +234,8 @@ export function isSignedIn(): boolean {
 export async function ensureDriveAccess(interactive = false): Promise<boolean> {
   if (!hasAccount()) return false;
   if (hasValidToken()) return true;
+  // No point waiting for the token timeout when the device says it's offline.
+  if (!interactive && typeof navigator !== 'undefined' && navigator.onLine === false) return false;
   try {
     await getAccessToken(interactive);
     return true;

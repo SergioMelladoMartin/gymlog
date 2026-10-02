@@ -59,9 +59,14 @@ vaya a usar la app (o publicarla) mientras esté en modo testing.
   Drive.
 - **Exportar**: *Ajustes → Backup → Exportar* descarga un `.fitnotes`
   compatible con la app oficial de FitNotes en Android.
-- **Sync**: cada cambio se sube a Drive (con flag `pending` persistente y
-  auto-reparación si una subida falla). El indicador del header refleja el
-  estado y permite forzar la sincronización.
+- **Sync**: la app abre siempre desde la copia local (OPFS) y se reconcilia
+  con Drive en segundo plano, así que la cobertura no bloquea nada. Cada
+  cambio se guarda al momento en el dispositivo y se sube agrupado; sin red
+  queda como *pendiente* y se reintenta solo (backoff, `online`, al volver a
+  la app). Si una subida llega a Drive pero se pierde la respuesta, el MD5
+  la reconoce como propia. Si otro dispositivo subió cambios mientras este
+  tenía series sin subir, gana la copia de Drive y la local se aparta en
+  *Ajustes* para restaurarla o descargarla.
 
 ## PWA / offline
 

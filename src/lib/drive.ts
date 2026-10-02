@@ -25,14 +25,31 @@ function setCachedFileId(id: string | null) {
 }
 
 // Drive operations occasionally hang on flaky mobile networks; without a
-// timeout the inFlight promise in sqlite.ts could pin the sync state to
-// "syncing" forever and block subsequent flushes. 30s is plenty for a
-// 200KB upload and short enough that we can recover by retrying.
-const DRIVE_TIMEOUT_MS = 30_000;
+// timeout a sync round could pin the state to "syncing" forever. Metadata
+// calls are tiny, so fail fast and let the retry loop try again. Uploads
+// scale with the file size: a weak gym signal can manage ~15 KB/s, and a
+// timeout shorter than the transfer would mean the push never lands.
+const META_TIMEOUT_MS = 15_000;
+const MIN_TRANSFER_TIMEOUT_MS = 30_000;
+const MAX_TRANSFER_TIMEOUT_MS = 180_000;
 
-async function timedFetch(input: RequestInfo, init: RequestInit = {}): Promise<Response> {
+function transferTimeout(bytes: number): number {
+  return Math.min(MAX_TRANSFER_TIMEOUT_MS, MIN_TRANSFER_TIMEOUT_MS + Math.ceil(bytes / 15_000) * 1000);
+}
+
+export type RemoteFile = { id: string; modifiedTime: string; size: number; md5: string | null };
+
+/** True for failures caused by the connection (offline, DNS, timeout) rather
+ *  than by Drive rejecting the request. Those are retried quietly. */
+export function isNetworkError(e: unknown): boolean {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return true;
+  const err = e as { name?: string } | null;
+  return err?.name === 'AbortError' || err?.name === 'TimeoutError' || e instanceof TypeError;
+}
+
+async function timedFetch(input: RequestInfo, init: RequestInit = {}, timeoutMs = META_TIMEOUT_MS): Promise<Response> {
   const ac = new AbortController();
-  const t = setTimeout(() => ac.abort(), DRIVE_TIMEOUT_MS);
+  const t = setTimeout(() => ac.abort(), timeoutMs);
   try {
     return await fetch(input, { ...init, signal: ac.signal });
   } finally {
@@ -47,12 +64,23 @@ async function authHeaders(extra: Record<string, string> = {}): Promise<Headers>
   return h;
 }
 
-async function findFile(retryOn403 = true): Promise<{ id: string; modifiedTime: string; size: number } | null> {
+function toRemoteFile(data: any): RemoteFile {
+  return {
+    id: data.id,
+    modifiedTime: data.modifiedTime,
+    size: Number(data.size ?? 0),
+    md5: typeof data.md5Checksum === 'string' ? data.md5Checksum.toLowerCase() : null,
+  };
+}
+
+const FILE_FIELDS = 'id,modifiedTime,size,md5Checksum';
+
+async function findFile(retryOn403 = true): Promise<RemoteFile | null> {
   const headers = await authHeaders();
   const params = new URLSearchParams({
     spaces: 'appDataFolder',
     q: `name = '${FILE_NAME}' and trashed = false`,
-    fields: 'files(id, modifiedTime, size)',
+    fields: `files(${FILE_FIELDS})`,
     pageSize: '1',
   });
   const res = await timedFetch(`${DRIVE_API}/files?${params}`, { headers });
@@ -73,15 +101,16 @@ async function findFile(retryOn403 = true): Promise<{ id: string; modifiedTime: 
   const file = data.files?.[0];
   if (!file) return null;
   setCachedFileId(file.id);
-  return { id: file.id, modifiedTime: file.modifiedTime, size: Number(file.size ?? 0) };
+  return toRemoteFile(file);
 }
 
-/** Returns null when no backup exists yet in Drive. */
-export async function pullBlobFromDrive(): Promise<ArrayBuffer | null> {
-  const file = await findFile();
+/** Returns null when no backup exists yet in Drive. Pass the metadata from a
+ *  previous `getRemoteMeta()` to skip a second lookup round-trip. */
+export async function pullBlobFromDrive(known?: RemoteFile): Promise<ArrayBuffer | null> {
+  const file = known ?? await findFile();
   if (!file) return null;
   const headers = await authHeaders();
-  const res = await timedFetch(`${DRIVE_API}/files/${file.id}?alt=media`, { headers });
+  const res = await timedFetch(`${DRIVE_API}/files/${file.id}?alt=media`, { headers }, transferTimeout(file.size));
   if (!res.ok) throw new Error(`drive download failed: ${res.status}`);
   return res.arrayBuffer();
 }
@@ -90,7 +119,7 @@ export async function getRemoteMeta() {
   return findFile();
 }
 
-async function createFile(bytes: Uint8Array): Promise<{ id: string; modifiedTime: string; size: number }> {
+async function createFile(bytes: Uint8Array): Promise<RemoteFile> {
   const headers = await authHeaders();
   const boundary = 'gymlog-' + Math.random().toString(36).slice(2);
   const metadata = {
@@ -114,37 +143,34 @@ async function createFile(bytes: Uint8Array): Promise<{ id: string; modifiedTime
   headers.set('Content-Type', `multipart/related; boundary=${boundary}`);
   // Ask Drive to echo the new modifiedTime/size in the response so we
   // don't need a separate findFile() round-trip after a push.
-  const res = await timedFetch(`${UPLOAD_API}/files?uploadType=multipart&fields=id,modifiedTime,size`, {
+  const res = await timedFetch(`${UPLOAD_API}/files?uploadType=multipart&fields=${FILE_FIELDS}`, {
     method: 'POST',
     headers,
     body,
-  });
+  }, transferTimeout(bytes.byteLength));
   if (!res.ok) throw new Error(`drive create failed: ${res.status} ${await res.text()}`);
   const data = await res.json();
   setCachedFileId(data.id);
-  return { id: data.id, modifiedTime: data.modifiedTime, size: Number(data.size ?? 0) };
+  return toRemoteFile(data);
 }
 
-async function updateFile(fileId: string, bytes: Uint8Array): Promise<{ id: string; modifiedTime: string; size: number }> {
+async function updateFile(fileId: string, bytes: Uint8Array): Promise<RemoteFile> {
   const headers = await authHeaders();
   headers.set('Content-Type', 'application/vnd.sqlite3');
-  const res = await timedFetch(`${UPLOAD_API}/files/${fileId}?uploadType=media&fields=id,modifiedTime,size`, {
+  const res = await timedFetch(`${UPLOAD_API}/files/${fileId}?uploadType=media&fields=${FILE_FIELDS}`, {
     method: 'PATCH',
     headers,
     body: bytes,
-  });
+  }, transferTimeout(bytes.byteLength));
   if (!res.ok) throw new Error(`drive update failed: ${res.status} ${await res.text()}`);
-  const data = await res.json();
-  return { id: data.id, modifiedTime: data.modifiedTime, size: Number(data.size ?? 0) };
+  return toRemoteFile(await res.json());
 }
 
 /** Push the bytes to Drive. Returns the new file metadata so the caller
  *  can update its stored sync watermark in one go (no extra round-trip).
  *  Tries the cached file id first to avoid a `findFile()` request — falls
  *  back to find/create if the file got deleted on the server. */
-export async function pushBlobToDrive(
-  bytes: Uint8Array,
-): Promise<{ id: string; modifiedTime: string; size: number }> {
+export async function pushBlobToDrive(bytes: Uint8Array): Promise<RemoteFile> {
   if (cachedFileId) {
     try {
       return await updateFile(cachedFileId, bytes);

@@ -13,9 +13,15 @@ import sqlite3InitModule, {
   type Database,
   type Sqlite3Static,
 } from '@sqlite.org/sqlite-wasm';
-import { deleteBlobFromDrive, pullBlobFromDrive, pushBlobToDrive, getRemoteMeta } from './drive';
-import { ensureDriveAccess, getAccessToken, hasAccount, hasValidToken, renewAccess } from './auth';
-import { backupDelete, backupRead, backupWrite, hashBytes } from './localBackup';
+import {
+  deleteBlobFromDrive, getRemoteMeta, isNetworkError, pullBlobFromDrive, pushBlobToDrive,
+  type RemoteFile,
+} from './drive';
+import { ensureDriveAccess, hasAccount, hasValidToken, renewAccess } from './auth';
+import {
+  backupDelete, backupRead, backupWrite, conflictDelete, conflictRead, conflictWrite, hashBytes,
+} from './localBackup';
+import { md5Hex } from './md5';
 
 const OPFS_NAME = '/gymlog.fitnotes';
 const LS_REMOTE_META = 'gymlog-drive-meta';
@@ -58,18 +64,19 @@ function isRemoteNewer(remote: RemoteMeta, stored: RemoteMeta | null): boolean {
 /** Persist a remote blob, update the sync watermark, and optionally hot-swap
  *  the in-memory DB (when the app is already running). */
 async function applyRemoteBytes(bytes: Uint8Array, meta: RemoteMeta, hotSwap: boolean): Promise<void> {
-  await persistLocalBytes(bytes);
-  writeStoredMeta(meta);
-  setPending(false);
-  dirty = false;
-  setLastSyncAt(Date.now());
+  // Swap before the first await so no mutation can land on the old DB.
   if (hotSwap && db) {
     db.close();
     db = openFromBytes(bytes);
     db.exec('PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;');
     migrateSchema(db);
-    window.dispatchEvent(new CustomEvent('gymlog:db-swapped'));
   }
+  writeStoredMeta({ modifiedTime: meta.modifiedTime, size: meta.size });
+  setPending(false);
+  dirty = false;
+  setLastSyncAt(Date.now());
+  await queuePersist(bytes);
+  if (hotSwap) window.dispatchEvent(new CustomEvent('gymlog:db-swapped'));
 }
 
 type DbStatus = 'idle' | 'loading' | 'ready' | 'error' | 'empty';
@@ -515,21 +522,20 @@ export async function loadDatabase(options: { seedUrl?: string } = {}): Promise<
       }
     }
 
-    // 2. If the user has a Google account, reconcile with Drive.
-    //    Remote-first: a stuck `pending` flag on stale local data must NOT
-    //    block pulling newer phone edits, and must NOT push old OPFS bytes
-    //    over a fresher Drive copy.
+    // 2. No local copy (new device, or storage was wiped): Drive is the only
+    //    source, so this is the one case where opening waits on the network.
+    //    When a local copy exists the app opens from it immediately and the
+    //    reconcile with Drive runs in the background (see the end of this
+    //    function), so a weak signal never blocks the screen.
     //
     //    We track whether the Drive read actually SUCCEEDED (vs. threw on a
-    //    flaky network / expired token). This matters for the no-local-copy
-    //    branch below: fabricating + pushing an empty DB is only safe when we
-    //    are certain Drive has nothing to lose. A read that merely *failed*
-    //    must NOT be mistaken for "Drive is empty".
+    //    flaky network / expired token). Fabricating + pushing an empty DB
+    //    below is only safe when we are certain Drive has nothing to lose.
     let remoteReadFailed = false;
     let remoteFileExists = false;
-    if (hasAccount()) {
+    if (!bytes && hasAccount()) {
       await ensureDriveAccess(false).catch(() => {});
-      let meta: Awaited<ReturnType<typeof getRemoteMeta>> | null = null;
+      let meta: RemoteFile | null = null;
       try {
         meta = await getRemoteMeta();
       } catch (e) {
@@ -538,50 +544,17 @@ export async function loadDatabase(options: { seedUrl?: string } = {}): Promise<
       }
       if (meta) {
         remoteFileExists = true;
-        const stored = readStoredMeta();
-        if (!bytes || isRemoteNewer(meta, stored)) {
-          let remote: ArrayBuffer | null = null;
-          try {
-            remote = await pullBlobFromDrive();
-          } catch (e) {
-            remoteReadFailed = true;
-            console.error('[load] pullBlobFromDrive failed', e);
-          }
+        try {
+          const remote = await pullBlobFromDrive(meta);
           if (remote) {
             bytes = new Uint8Array(remote);
             await applyRemoteBytes(bytes, meta, false);
-            console.log('[sync] pulled newer remote copy on load');
-          } else if (!bytes) {
-            // Drive has a file but we couldn't download it and have nothing
-            // local to fall back on → recoverable error, not "empty".
-            remoteReadFailed = true;
+            console.log('[sync] pulled remote copy on load');
           }
-        } else if (isPending() && bytes) {
-          // Remote unchanged since our last sync — safe to self-heal a push.
-          try {
-            const pushMeta = await pushBlobToDrive(bytes);
-            writeStoredMeta({ modifiedTime: pushMeta.modifiedTime, size: pushMeta.size });
-            setLastSyncAt(Date.now());
-            setPending(false);
-            console.log('[sync] self-heal: pushed pending OPFS bytes to Drive');
-          } catch (e) {
-            console.error('[sync] self-heal push failed; will retry later', e);
-          }
-        }
-      } else if (!remoteReadFailed && isPending() && bytes) {
-        // No remote file yet — seed Drive from the local pending copy.
-        try {
-          const pushMeta = await pushBlobToDrive(bytes);
-          writeStoredMeta({ modifiedTime: pushMeta.modifiedTime, size: pushMeta.size });
-          setLastSyncAt(Date.now());
-          setPending(false);
-          console.log('[sync] self-heal: seeded Drive from pending OPFS');
         } catch (e) {
-          console.error('[sync] self-heal push failed; will retry later', e);
+          console.error('[load] pullBlobFromDrive failed', e);
         }
-      } else if (remoteReadFailed && isPending() && bytes) {
-        // Can't tell whether remote is newer — refuse to push stale bytes.
-        console.warn('[sync] remote unreadable with pending local — skipping self-heal push');
+        if (!bytes) remoteReadFailed = true;
       }
     }
 
@@ -640,6 +613,10 @@ export async function loadDatabase(options: { seedUrl?: string } = {}): Promise<
     if (migrated) {
       try { await persistLocalBytes(serialize(db)); } catch (e) { console.error('[load] persist migrated bytes', e); }
       if (hasAccount()) scheduleSync(true).catch(() => {});
+    } else if (hasAccount()) {
+      // Background reconcile: pull another device's changes, or push edits
+      // left pending by a previous session.
+      void requestSync();
     }
   } catch (e) {
     console.error('loadDatabase', e);
@@ -744,26 +721,39 @@ export function getDb(): Database {
 
 // ── sync to Drive ─────────────────────────────────────────────────────
 //
-// Reliability model:
-//   1. Every mutation calls `markDirty()` which immediately kicks off a
-//      Drive push (no debounce). Multiple mutations in quick succession
-//      coalesce via the in-flight check + a "still dirty after flush"
-//      re-fire — so the server is hit at most once per push round-trip,
-//      not once per keystroke.
-//   2. The "I have unpushed changes" bit is persisted to localStorage so
-//      a session that died mid-push (mobile backgrounding, network drop,
-//      page close) can self-heal on the next load: before any remote-
-//      newer check, we re-push the OPFS bytes to Drive.
-//   3. `online` and `visibilitychange → visible` both re-attempt the push
-//      if the pending flag is still set, catching cases where the user
-//      came back to a previously-failed device.
+// Reliability model (built for a gym with one bar of signal):
+//   1. Every mutation is written to OPFS within a moment, independent of the
+//      network, and the "unpushed changes" bit is persisted to localStorage
+//      so a session that dies mid-push self-heals on the next launch.
+//   2. All Drive work goes through one serialized loop (`requestSync`):
+//      look at the remote copy, pull it if another device changed it,
+//      otherwise push ours. Bursts of edits coalesce into a single upload.
+//   3. A network failure is not an error: the state becomes `offline` and a
+//      backoff timer retries (as do `online`, visibility and a 2-min poll).
+//   4. The MD5 of every upload is remembered. When an upload landed but its
+//      response was lost to a dropped connection, Drive's copy is then
+//      recognised as ours instead of being "pulled" over newer local edits.
+//   5. If another device really did push while this one had unsynced edits,
+//      Drive's copy wins (it's what every other device sees) and the local
+//      bytes are parked as a conflict copy that Settings can restore.
 
-export type SyncState = 'idle' | 'dirty' | 'syncing' | 'error';
+export type SyncState = 'idle' | 'dirty' | 'syncing' | 'offline' | 'error';
 const LS_LAST_SYNC = 'gymlog-last-sync';
 const LS_PENDING = 'gymlog-sync-pending';
+const LS_PUSHED_MD5 = 'gymlog-pushed-md5';
+const PUSH_DEBOUNCE_MS = 1_500;
+const PERSIST_DEBOUNCE_MS = 250;
+const MAX_RETRY_DELAY_MS = 60_000;
 
 let dirty = false;
-let inFlight: Promise<void> | null = null;
+let mutationSeq = 0;
+let syncLoop: Promise<void> | null = null;
+let rerunSync = false;
+let pushTimer: ReturnType<typeof setTimeout> | null = null;
+let persistTimer: ReturnType<typeof setTimeout> | null = null;
+let retryTimer: ReturnType<typeof setTimeout> | null = null;
+let retryCount = 0;
+let persistChain: Promise<void> = Promise.resolve();
 let syncState: SyncState = 'idle';
 let lastSyncAt: number | null = (() => {
   try {
@@ -795,6 +785,40 @@ function setPending(v: boolean): void {
     else localStorage.removeItem(LS_PENDING);
   } catch {}
 }
+function wantsPush(): boolean {
+  return dirty || isPending();
+}
+function isOffline(): boolean {
+  return typeof navigator !== 'undefined' && navigator.onLine === false;
+}
+
+function readPushedHashes(): string[] {
+  try { return JSON.parse(localStorage.getItem(LS_PUSHED_MD5) ?? '[]'); } catch { return []; }
+}
+function rememberPushedHash(md5: string): void {
+  try {
+    const list = readPushedHashes().filter((h) => h !== md5);
+    list.push(md5);
+    localStorage.setItem(LS_PUSHED_MD5, JSON.stringify(list.slice(-20)));
+  } catch {}
+}
+function isOwnPush(remote: RemoteFile): boolean {
+  return !!remote.md5 && readPushedHashes().includes(remote.md5);
+}
+
+/** Serialize OPFS writes: overlapping `createWritable()` calls on the same
+ *  file can fail, and the last write must be the newest bytes. */
+function queuePersist(bytes: Uint8Array): Promise<void> {
+  const p = persistChain.then(() => persistLocalBytes(bytes));
+  persistChain = p.catch((e) => console.error('[persist]', e));
+  return p;
+}
+
+function persistNow(): Promise<void> {
+  if (persistTimer) { clearTimeout(persistTimer); persistTimer = null; }
+  if (!db) return persistChain;
+  return queuePersist(serialize(db)).catch(() => {});
+}
 
 export function getSyncInfo(): { state: SyncState; lastSyncAt: number | null } {
   return { state: syncState, lastSyncAt };
@@ -808,108 +832,154 @@ export function onSyncChange(fn: (info: { state: SyncState; lastSyncAt: number |
 
 export function markDirty() {
   dirty = true;
-  // Persist the bit so the next session can self-heal even if the page
-  // dies before the upload finishes (mobile lifecycle, iOS Safari, etc).
+  mutationSeq++;
   setPending(true);
-  if (syncState !== 'syncing') setSyncState('dirty');
-  // Push immediately. The in-flight + still-dirty re-fire pattern below
-  // coalesces bursts so we don't actually upload on every keystroke.
-  void flushToDrive().catch(() => {});
+  if (syncState !== 'syncing') setSyncState(isOffline() ? 'offline' : 'dirty');
+  if (!persistTimer) {
+    persistTimer = setTimeout(() => { void persistNow(); }, PERSIST_DEBOUNCE_MS);
+  }
+  schedulePush(PUSH_DEBOUNCE_MS);
 }
 
-async function flushToDrive(): Promise<void> {
-  if (!db || !dirty) return;
-  if (inFlight) return inFlight;
+function schedulePush(delay: number) {
+  if (!hasAccount()) return;
+  if (pushTimer) clearTimeout(pushTimer);
+  pushTimer = setTimeout(() => { pushTimer = null; void requestSync(); }, delay);
+}
 
-  // Another device may have pushed while we were offline. Pull first so we
-  // never overwrite a fresher Drive copy with stale local bytes.
-  if (hasAccount()) {
-    const accessible = await ensureDriveAccess(false);
-    if (accessible) {
-      const meta = await getRemoteMeta().catch(() => null);
-      if (meta && isRemoteNewer(meta, readStoredMeta())) {
-        const pulled = await pullRemoteIfNewer();
-        if (pulled) return;
-        setSyncState('error');
-        return;
-      }
+function scheduleRetry() {
+  if (retryTimer || !wantsPush()) return;
+  const delay = Math.min(MAX_RETRY_DELAY_MS, 5_000 * 2 ** retryCount);
+  retryCount++;
+  retryTimer = setTimeout(() => { retryTimer = null; void requestSync(); }, delay);
+}
+
+function clearRetry() {
+  if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+  retryCount = 0;
+}
+
+/** Run a sync round, or join the one in progress (which then runs again). */
+function requestSync(): Promise<void> {
+  if (pushTimer) { clearTimeout(pushTimer); pushTimer = null; }
+  if (syncLoop) { rerunSync = true; return syncLoop; }
+  syncLoop = (async () => {
+    try {
+      do {
+        rerunSync = false;
+        // A failed round leaves the retry timer in charge; don't spin.
+        if (!(await syncOnce())) break;
+      } while (rerunSync);
+    } finally {
+      syncLoop = null;
     }
+  })();
+  return syncLoop;
+}
+
+/** One reconcile with Drive. Resolves false when it couldn't finish. */
+async function syncOnce(): Promise<boolean> {
+  if (!db || !hasAccount()) return true;
+  if (isOffline()) {
+    if (wantsPush()) { setSyncState('offline'); scheduleRetry(); }
+    return false;
   }
 
-  // NOTE: deliberately *not* bailing on missing token. ensureDriveAccess /
-  // getAccessToken trigger a silent refresh; if that fails the error surfaces
-  // as the red pill and the user can tap it to re-auth interactively.
-  dirty = false;
-  setSyncState('syncing');
-  inFlight = (async () => {
-    try {
-      const bytes = serialize(db!);
-      await persistLocalBytes(bytes);
+  let pushSeq: number | null = null;
+  try {
+    if (wantsPush()) setSyncState('syncing');
+    if (!(await ensureDriveAccess(false))) {
+      // No silent token: either no signal, or Google needs an interactive
+      // re-auth (the header pill offers "renovar acceso" for that case).
+      if (wantsPush()) { setSyncState('offline'); scheduleRetry(); }
+      else setSyncState('idle');
+      return false;
+    }
+
+    const remote = await getRemoteMeta();
+    if (remote && isRemoteNewer(remote, readStoredMeta())) {
+      if (isOwnPush(remote)) {
+        // An earlier upload of ours landed but we never saw the response.
+        writeStoredMeta({ modifiedTime: remote.modifiedTime, size: remote.size });
+      } else {
+        const buf = await pullBlobFromDrive(remote);
+        if (!buf) throw new Error('drive download returned nothing');
+        await parkLocalEditsIfAny();
+        // No await between the check above and the swap inside
+        // applyRemoteBytes, so no edit can slip in and be lost.
+        await applyRemoteBytes(new Uint8Array(buf), remote, true);
+        clearRetry();
+        setSyncState('idle');
+        return true;
+      }
+    }
+
+    if (!wantsPush()) {
+      clearRetry();
+      setSyncState('idle');
+      return true;
+    }
+
+    setSyncState('syncing');
+    pushSeq = mutationSeq;
+    dirty = false;
+    const bytes = serialize(db);
+    const md5 = md5Hex(bytes);
+    if (remote && remote.md5 === md5) {
+      // Drive already holds exactly these bytes (e.g. the lost-response case).
+      writeStoredMeta({ modifiedTime: remote.modifiedTime, size: remote.size });
+    } else {
+      void queuePersist(bytes).catch(() => {});
+      rememberPushedHash(md5);
       const meta = await pushBlobToDrive(bytes);
-      const verified = await getRemoteMeta().catch(() => null);
-      if (!verified || verified.size !== bytes.byteLength) {
+      if (meta.size !== bytes.byteLength) {
         throw new Error('La subida a Drive no se verificó correctamente');
       }
       writeStoredMeta({ modifiedTime: meta.modifiedTime, size: meta.size });
-      setLastSyncAt(Date.now());
-      // Only clear the pending bit if no new mutation came in mid-flight.
-      if (!dirty) setPending(false);
-      setSyncState(dirty ? 'dirty' : 'idle');
-    } catch (e) {
-      dirty = true;             // keep the dirty bit so we retry later
-      setSyncState('error');
-      throw e;
-    } finally {
-      inFlight = null;
     }
-  })();
-  // After this push lands, if more mutations sneaked in, run another.
-  inFlight
-    .then(() => {
-      if (dirty && !inFlight) {
-        // tiny delay so React state updates can batch
-        setTimeout(() => { void flushToDrive().catch(() => {}); }, 50);
-      }
-    })
-    .catch(() => {/* error path handles its own retry via online/visibility */});
-  return inFlight;
-}
-
-/**
- * If the remote copy on Drive is newer than what we have locally, pull it in
- * and hot-swap the in-memory database. Returns true if a swap happened.
- * Safe to call opportunistically (on tab focus, etc). Skips if there are
- * unpushed local edits — those get flushed first by the caller.
- */
-async function pullRemoteIfNewer(): Promise<boolean> {
-  if (!db || !hasAccount()) return false;
-  if (inFlight) return false;
-  const accessible = await ensureDriveAccess(false);
-  if (!accessible) return false;
-  const meta = await getRemoteMeta().catch(() => null);
-  if (!meta) return false;
-  if (!isRemoteNewer(meta, readStoredMeta())) return false;
-  // Remote is genuinely newer — pull even if dirty/pending. A stuck pending
-  // flag on stale local data must not block receiving phone edits.
-  const buf = await pullBlobFromDrive().catch(() => null);
-  if (!buf) return false;
-  await applyRemoteBytes(new Uint8Array(buf), meta, true);
-  setSyncState('idle');
-  return true;
-}
-
-export async function checkForRemoteUpdates(): Promise<boolean> {
-  if (await pullRemoteIfNewer()) return true;
-  if (dirty || isPending()) {
-    try { await flushToDrive(); } catch {}
+    setLastSyncAt(Date.now());
+    // Only clear the pending bit if no new mutation came in mid-flight.
+    if (mutationSeq === pushSeq) setPending(false);
+    clearRetry();
+    if (dirty) rerunSync = true;
+    setSyncState(dirty ? 'dirty' : 'idle');
+    return true;
+  } catch (e) {
+    if (pushSeq !== null) dirty = true; // keep the edits queued for the retry
+    const network = isNetworkError(e);
+    if (network) console.warn('[sync] network unavailable, will retry', e);
+    else console.error('[sync] failed', e);
+    if (wantsPush()) {
+      setSyncState(network ? 'offline' : 'error');
+      scheduleRetry();
+    } else {
+      setSyncState(network ? 'idle' : 'error');
+    }
+    return false;
   }
-  return false;
+}
+
+/** Before Drive's copy replaces the local DB, keep any unsynced local edits
+ *  as a conflict copy. Loops in case an edit lands while we're saving. */
+async function parkLocalEditsIfAny(): Promise<void> {
+  for (let i = 0; i < 3 && wantsPush() && db; i++) {
+    const seq = mutationSeq;
+    await conflictWrite(serialize(db));
+    console.warn('[sync] another device updated Drive; local edits saved as a conflict copy');
+    window.dispatchEvent(new CustomEvent('gymlog:sync-conflict'));
+    if (mutationSeq === seq) return;
+  }
+}
+
+export async function checkForRemoteUpdates(): Promise<void> {
+  return requestSync();
 }
 
 export async function scheduleSync(immediate = false): Promise<void> {
+  if (!immediate) { markDirty(); return; }
   dirty = true;
-  if (immediate) return flushToDrive();
-  markDirty();
+  setPending(true);
+  return requestSync();
 }
 
 /** Serialize the current in-memory database. Callers typically trigger a
@@ -919,95 +989,81 @@ export function exportBytes(): Uint8Array {
   return serialize(db);
 }
 
-/** Force a flush right now (e.g. from a "Sincronizar" button in Settings).
- *  Resolves when the upload completes. */
+/** Force a flush right now. Resolves when the sync round completes. */
 export async function flushNow(): Promise<void> {
-  if (!dirty && !isPending()) return;
-  // If pending but dirty=false (app loaded with stale flag from previous
-  // session), set dirty so flushToDrive actually runs.
-  if (isPending()) dirty = true;
-  return flushToDrive();
+  if (!wantsPush()) return;
+  dirty = true;
+  return requestSync();
 }
 
-/** User-triggered "sincroniza ya" — pushes pending edits and then pulls
- *  any remote updates from another device. Always does both legs so the
- *  pill click always reconciles, even when nothing is dirty locally. If
- *  the silent token refresh has been failing (iOS Safari, blocked
- *  third-party cookies), this is also our chance to prompt the user
- *  interactively from inside their gesture. */
+/** User-triggered "sincroniza ya": reconciles both ways right away. If the
+ *  silent token refresh has been failing (iOS Safari, blocked third-party
+ *  cookies), this is also our chance to prompt from inside the gesture. */
 export async function forceSync(): Promise<void> {
   if (!hasAccount()) return;
-
   if (!hasValidToken()) {
     const renewed = await renewAccess(true);
     if (!renewed) return;
   }
+  clearRetry();
+  return requestSync();
+}
 
-  // Remote-first: if another device pushed since our last sync, pull it and
-  // skip pushing — otherwise we'd clobber their edits with stale local data.
-  try {
-    const meta = await getRemoteMeta();
-    if (meta && isRemoteNewer(meta, readStoredMeta())) {
-      await pullRemoteIfNewer();
-      return;
-    }
-  } catch (e) {
-    console.error('[forceSync] remote check failed', e);
-  }
+// ── conflict copy (see sync model, point 5) ───────────────────────────
 
-  if (dirty || isPending()) {
-    try {
-      await flushNow();
-    } catch (e) {
-      console.error('[forceSync] push failed, trying interactive re-auth', e);
-      try {
-        await getAccessToken(true); // popup, runs inside the click gesture
-        // Re-arm dirty so flushToDrive actually runs and try again.
-        if (isPending()) {
-          dirty = true;
-          await flushToDrive();
-        }
-      } catch (e2) {
-        console.error('[forceSync] interactive re-auth failed', e2);
-      }
-    }
-  }
-  try { await pullRemoteIfNewer(); } catch (e) { console.error('[forceSync] pull', e); }
+export async function getConflictCopy(): Promise<{ bytes: Uint8Array; at: number } | null> {
+  return conflictRead();
+}
+
+export async function discardConflictCopy(): Promise<void> {
+  await conflictDelete();
+  window.dispatchEvent(new CustomEvent('gymlog:sync-conflict'));
+}
+
+/** Make the parked local copy the current DB again and push it to Drive. */
+export async function restoreConflictCopy(): Promise<void> {
+  const copy = await conflictRead();
+  if (!copy) return;
+  await importBytes(copy.bytes);
+  await discardConflictCopy();
 }
 
 if (typeof window !== 'undefined') {
-  /** Pull remote updates first; only push local pending edits when Drive
-   *  hasn't moved ahead (see checkForRemoteUpdates). */
   const reconcileSync = () => {
-    if (inFlight) return;
-    void checkForRemoteUpdates().catch(() => {});
+    if (syncLoop || !hasAccount()) return;
+    void requestSync();
   };
 
-  // Page is being torn down — last chance to push. Async fetch may not
-  // complete on mobile but we still try, and the pending flag survives in
-  // localStorage so the next session self-heals.
+  // Page is being torn down: write OPFS now and try a last push. The push may
+  // not complete on mobile, but the pending flag survives in localStorage so
+  // the next session self-heals.
   window.addEventListener('pagehide', () => {
-    if (dirty || isPending()) {
-      void flushToDrive().catch(() => {});
-    }
+    void persistNow();
+    if (wantsPush()) void requestSync();
   });
 
   window.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') {
-      if (dirty) void flushToDrive().catch(() => {});
+      void persistNow();
+      if (wantsPush()) void requestSync();
     } else if (document.visibilityState === 'visible') {
       // Came back from background. If a previous load bailed because Drive
-      // was unreachable, retry now that we're foregrounded. Otherwise finish
-      // any pending upload and check whether another device pushed an update.
+      // was unreachable, retry now. Otherwise finish any pending upload and
+      // check whether another device pushed an update.
       if (status === 'error') { retryLoad(); return; }
       reconcileSync();
     }
   });
 
-  // Network came back — retry a stalled load first, else reconcile.
+  // Network came back: retry a stalled load first, else reconcile right away.
   window.addEventListener('online', () => {
     if (status === 'error') { retryLoad(); return; }
+    clearRetry();
     reconcileSync();
+  });
+
+  window.addEventListener('offline', () => {
+    if (wantsPush() && syncState !== 'syncing') setSyncState('offline');
   });
 
   // Background poll: every 2 minutes while foreground, reconcile with Drive.
@@ -1015,6 +1071,13 @@ if (typeof window !== 'undefined') {
     if (document.visibilityState !== 'visible') return;
     reconcileSync();
   }, 120_000);
+}
+
+function resetSyncRuntime() {
+  if (pushTimer) { clearTimeout(pushTimer); pushTimer = null; }
+  if (persistTimer) { clearTimeout(persistTimer); persistTimer = null; }
+  clearRetry();
+  try { localStorage.removeItem(LS_PUSHED_MD5); } catch {}
 }
 
 /** Destructive — remove the gymlog.fitnotes backup from the user's Drive
@@ -1030,6 +1093,7 @@ export async function wipeAll(): Promise<void> {
   setLastSyncAt(null);
   setPending(false);
   dirty = false;
+  resetSyncRuntime();
   setSyncState('idle');
   setStatus('idle');
 }
@@ -1044,6 +1108,7 @@ export async function resetLocal(): Promise<void> {
   setLastSyncAt(null);
   setPending(false);
   dirty = false;
+  resetSyncRuntime();
   setSyncState('idle');
   setStatus('idle');
 }

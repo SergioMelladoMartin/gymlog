@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { forceSync, getSyncInfo, onSyncChange, type SyncState } from '../lib/sqlite';
+import { forceSync, getConflictCopy, getSyncInfo, onSyncChange, type SyncState } from '../lib/sqlite';
 import { getAuthStatus, onAuthChange, renewAccess, type AuthStatus } from '../lib/auth';
 import { hapticSuccess } from '../lib/haptics';
 import { useT } from '../hooks/useT';
@@ -7,22 +7,31 @@ import { useT } from '../hooks/useT';
 /**
  * Compact sync pill in the header. States:
  *   • idle            → ✓ hace 3 min
- *   • dirty           → cambios sin subir
+ *   • dirty           → cambios sin subir (about to upload)
  *   • syncing         → subiendo
- *   • error           → error al sincronizar
+ *   • offline         → pendiente de subir: saved locally, waiting for signal
+ *   • error           → error al sincronizar (Drive rejected the request)
  *   • token_expired   → renovar acceso a Drive
- *   • offline         → sin conexión
+ * Plus a separate amber chip when a sync conflict left a copy in Settings.
  */
 export default function SyncStatus() {
   const { t } = useT();
   const [info, setInfo] = useState(() => getSyncInfo());
   const [authStatus, setAuthStatus] = useState<AuthStatus>(() => getAuthStatus());
   const [online, setOnline] = useState(() => typeof navigator === 'undefined' ? true : navigator.onLine);
+  const [hasConflict, setHasConflict] = useState(false);
   const [, setTick] = useState(0);
   const prevState = useRef<SyncState>(info.state);
 
   useEffect(() => onSyncChange(setInfo), []);
   useEffect(() => onAuthChange(setAuthStatus), []);
+
+  useEffect(() => {
+    const refresh = () => { void getConflictCopy().then((c) => setHasConflict(!!c)); };
+    refresh();
+    window.addEventListener('gymlog:sync-conflict', refresh);
+    return () => window.removeEventListener('gymlog:sync-conflict', refresh);
+  }, []);
 
   useEffect(() => {
     const onOn = () => setOnline(true);
@@ -49,38 +58,40 @@ export default function SyncStatus() {
   }, [state, online]);
 
   const tokenExpired = authStatus === 'token_expired';
-  const effState: SyncState = !online && state !== 'syncing'
-    ? 'error'
-    : tokenExpired && state === 'idle'
-      ? 'error'
-      : state;
+  const waiting = state === 'offline' || (!online && state === 'dirty');
 
   let tone = 'text-muted';
   let icon: React.ReactNode = null;
   let label = '';
   let aria = '';
 
-  if (!online) {
-    tone = 'text-muted';
-    label = t('sync.offline');
-    icon = <DotIcon />;
-    aria = t('sync.offline');
-  } else if (tokenExpired && state !== 'syncing' && state !== 'dirty') {
-    tone = 'text-amber-400';
-    label = t('sync.tokenExpired');
-    icon = <KeyIcon />;
-    aria = `${t('sync.tokenExpired')} — ${t('sync.tapToRenew')}`;
-  } else if (effState === 'syncing') {
+  if (state === 'syncing') {
     tone = 'text-amber-400';
     label = t('sync.syncing');
     icon = <SpinIcon />;
     aria = t('sync.syncing');
-  } else if (effState === 'dirty') {
+  } else if (tokenExpired && state !== 'dirty') {
+    tone = 'text-amber-400';
+    label = t('sync.tokenExpired');
+    icon = <KeyIcon />;
+    aria = `${t('sync.tokenExpired')} — ${t('sync.tapToRenew')}`;
+  } else if (waiting) {
+    // Not an error: the workout is safe on the device and uploads by itself.
+    tone = 'text-amber-400';
+    label = t('sync.pending');
+    icon = <CloudOffIcon />;
+    aria = t('sync.pendingHint');
+  } else if (!online) {
+    tone = 'text-muted';
+    label = t('sync.offline');
+    icon = <CloudOffIcon />;
+    aria = t('sync.offline');
+  } else if (state === 'dirty') {
     tone = 'text-amber-400';
     label = t('sync.dirty');
     icon = <DotIcon filled />;
     aria = `${t('sync.dirty')} — ${t('action.retry')}`;
-  } else if (effState === 'error') {
+  } else if (state === 'error') {
     tone = 'text-danger';
     label = t('sync.error');
     icon = <WarnIcon />;
@@ -102,17 +113,30 @@ export default function SyncStatus() {
   }
 
   return (
-    <button
-      type="button"
-      onClick={() => { void handleClick(); }}
-      disabled={effState === 'syncing'}
-      title={aria}
-      aria-label={aria}
-      className={`inline-flex items-center gap-1 rounded-full border border-border bg-card/70 px-2 py-1 text-[11px] font-medium tabular-nums transition hover:bg-elevated disabled:cursor-wait ${tone}`}
-    >
-      {icon}
-      <span className="hidden sm:inline">{label}</span>
-    </button>
+    <div className="flex items-center gap-1.5">
+      {hasConflict && (
+        <a
+          href="/settings#sync-conflict"
+          title={t('sync.conflictHint')}
+          aria-label={t('sync.conflictHint')}
+          className="inline-flex items-center gap-1 rounded-full border border-amber-400/40 bg-amber-400/10 px-2 py-1 text-[11px] font-medium text-amber-400"
+        >
+          <WarnIcon />
+          <span className="hidden sm:inline">{t('sync.conflict')}</span>
+        </a>
+      )}
+      <button
+        type="button"
+        onClick={() => { void handleClick(); }}
+        disabled={state === 'syncing'}
+        title={aria}
+        aria-label={aria}
+        className={`inline-flex items-center gap-1 rounded-full border border-border bg-card/70 px-2 py-1 text-[11px] font-medium tabular-nums transition hover:bg-elevated disabled:cursor-wait ${tone}`}
+      >
+        {icon}
+        <span className="hidden sm:inline">{label}</span>
+      </button>
+    </div>
   );
 }
 
@@ -161,6 +185,15 @@ function KeyIcon() {
     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
       <path d="m15.5 7.5 2.893 2.893a1 1 0 0 0 1.414 0l2.379-2.379a1 1 0 0 0 0-1.414L19 4.5" />
       <path d="M7 11a4 4 0 1 0 0 8h1" />
+    </svg>
+  );
+}
+function CloudOffIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="m2 2 20 20" />
+      <path d="M5.782 5.782A7 7 0 0 0 9 19h8.5a4.5 4.5 0 0 0 1.307-.193" />
+      <path d="M21.532 16.5A4.5 4.5 0 0 0 17.5 10h-1.79A7.008 7.008 0 0 0 10 5.07" />
     </svg>
   );
 }
