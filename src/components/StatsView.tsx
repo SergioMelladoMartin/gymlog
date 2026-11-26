@@ -9,6 +9,8 @@ const StatsTrendChart = lazy(() => import('./StatsTrendChart'));
 
 type Range = 'all' | '7d' | '30d' | '90d' | '365d' | 'year';
 type GroupBy = 'week' | 'month' | 'year';
+type TrendSpan = '1y' | '2y' | '3y' | 'all';
+const SPAN_YEARS: Record<Exclude<TrendSpan, 'all'>, number> = { '1y': 1, '2y': 2, '3y': 3 };
 type TrendMetric = 'workouts' | 'volume' | 'sets' | 'reps';
 
 interface TrendRow { period: string; days: number; sets: number; reps: number; volume: number }
@@ -85,9 +87,10 @@ export default function StatsView() {
   const [groupBy, setGroupBy] = useState<GroupBy>('week');
   const [trendMetric, setTrendMetric] = useState<TrendMetric>('workouts');
   const [trend, setTrend] = useState<TrendRow[]>([]);
-  // How many windows back in time the trend chart is showing (0 = latest).
-  const [trendPage, setTrendPage] = useState(0);
-  const trendLimit = groupBy === 'week' ? 52 : groupBy === 'month' ? 12 : Infinity;
+  // How much history the trend chart shows at once (years, or everything).
+  const [trendSpan, setTrendSpan] = useState<TrendSpan>('all');
+  const perYear = groupBy === 'week' ? 52 : groupBy === 'month' ? 12 : 1;
+  const trendLimit = groupBy === 'year' || trendSpan === 'all' ? Infinity : SPAN_YEARS[trendSpan] * perYear;
 
   const trendMetrics = useMemo(() => ([
     { id: 'workouts' as const, label: t('stats.metricWorkouts'), field: 'days' as const, unit: undefined },
@@ -206,9 +209,6 @@ export default function StatsView() {
     );
   }, [ready, revision, groupBy]);
 
-  // Reset to the latest window whenever the grouping changes.
-  useEffect(() => { setTrendPage(0); }, [groupBy]);
-
   if (!ready) return <StatsSkeleton />;
 
   const label = rangeLabel(range, year, t);
@@ -225,26 +225,23 @@ export default function StatsView() {
   ];
 
   const activeTrend = trendMetrics.find((m) => m.id === trendMetric)!;
-  const pageCount = Number.isFinite(trendLimit) ? Math.max(1, Math.ceil(trend.length / trendLimit)) : 1;
-  const page = Math.min(trendPage, pageCount - 1);
-  const windowEnd = Number.isFinite(trendLimit) ? trend.length - page * trendLimit : trend.length;
-  const windowStart = Number.isFinite(trendLimit) ? Math.max(0, windowEnd - trendLimit) : 0;
-  const visibleTrend = trend.slice(windowStart, windowEnd);
+  const visibleTrend = Number.isFinite(trendLimit) ? trend.slice(-trendLimit) : trend;
   const periodLabel = (p: string, long = false) =>
     groupBy === 'week'
       ? fmtDate(p, long ? { day: 'numeric', month: 'short', year: '2-digit' } : { day: 'numeric', month: 'short' })
       : groupBy === 'month'
         ? fmtDate(p + '-01', { month: 'short', year: '2-digit' })
         : p;
+  // Over a year of weeks, axis ticks need the year to stay readable.
+  const manyWeeks = groupBy === 'week' && visibleTrend.length > 52;
   const trendData = visibleTrend.map((r) => ({
-    label: periodLabel(r.period),
+    label: manyWeeks ? fmtDate(r.period, { month: 'short', year: '2-digit' }) : periodLabel(r.period),
+    tooltip: periodLabel(r.period, true),
     value: Number(r[activeTrend.field]),
   }));
   const windowLabel = visibleTrend.length
     ? `${periodLabel(visibleTrend[0].period, true)} – ${periodLabel(visibleTrend[visibleTrend.length - 1].period, true)}`
     : '';
-  const canOlder = windowStart > 0;
-  const canNewer = page > 0;
 
   const weekdayLong = weekdaysLong();
   const weekdayShort = weekdaysNarrow();
@@ -297,37 +294,23 @@ export default function StatsView() {
           <StatsTrendChart data={trendData} unit={activeTrend.unit} />
         </Suspense>
 
-        {pageCount > 1 && (
-          <div className="mt-2 flex items-center justify-between gap-2 text-xs">
-            <button
-              type="button"
-              onClick={() => setTrendPage(page + 1)}
-              disabled={!canOlder}
-              aria-label={t('stats.older')}
-              className="grid h-8 w-8 place-items-center rounded-full border border-border bg-elevated/50 text-muted transition hover:bg-elevated hover:text-fg disabled:opacity-30"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
-            </button>
-            <button
-              type="button"
-              onClick={() => setTrendPage(0)}
-              disabled={!canNewer}
-              className="min-w-0 truncate rounded-full px-2 py-1 tabular-nums text-muted transition enabled:hover:text-fg"
-              title={canNewer ? t('stats.backToLatest') : undefined}
-            >
-              {windowLabel}
-            </button>
-            <button
-              type="button"
-              onClick={() => setTrendPage(page - 1)}
-              disabled={!canNewer}
-              aria-label={t('stats.newer')}
-              className="grid h-8 w-8 place-items-center rounded-full border border-border bg-elevated/50 text-muted transition hover:bg-elevated hover:text-fg disabled:opacity-30"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
-            </button>
-          </div>
-        )}
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs">
+          {groupBy !== 'year' ? (
+            <div className="flex gap-1">
+              {(['1y', '2y', '3y', 'all'] as const).map((sp) => (
+                <button
+                  key={sp}
+                  type="button"
+                  onClick={() => setTrendSpan(sp)}
+                  className={`shrink-0 rounded-full px-3 py-1 text-[11px] font-semibold transition ${trendSpan === sp ? 'btn-accent' : 'bg-elevated/50 text-muted hover:bg-elevated hover:text-fg'}`}
+                >
+                  {sp === 'all' ? t('stats.chipAll') : t('stats.spanYears', { n: SPAN_YEARS[sp] })}
+                </button>
+              ))}
+            </div>
+          ) : <span />}
+          <span className="tabular-nums text-muted">{windowLabel}</span>
+        </div>
       </div>
 
       <div className="mb-2 flex items-baseline justify-between gap-2">

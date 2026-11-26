@@ -13,6 +13,8 @@ import {
 export interface TrendPoint {
   label: string;
   value: number;
+  /** Longer label for the tooltip (defaults to `label`). */
+  tooltip?: string;
 }
 
 function readCssColors() {
@@ -41,6 +43,7 @@ export default function StatsTrendChart({
 }) {
   const colors = useMemo(readCssColors, []);
   const { t, fmt } = useLocale();
+  const dense = data.length > 60;
 
   if (!data.length) {
     return (
@@ -53,7 +56,11 @@ export default function StatsTrendChart({
   return (
     <div className="h-56 w-full select-none">
       <ResponsiveContainer>
-        <BarChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: -18 }}>
+        <BarChart
+          data={data}
+          margin={{ top: 8, right: 8, bottom: 0, left: -18 }}
+          barCategoryGap={dense ? 1 : '20%'}
+        >
           <defs>
             <linearGradient id="barFill" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor={colors.accent} stopOpacity={0.95} />
@@ -65,7 +72,7 @@ export default function StatsTrendChart({
             dataKey="label"
             tick={{ fill: colors.muted, fontSize: 11 }}
             interval="preserveStartEnd"
-            minTickGap={14}
+            minTickGap={dense ? 28 : 14}
             axisLine={{ stroke: colors.grid }}
             tickLine={false}
           />
@@ -84,7 +91,7 @@ export default function StatsTrendChart({
               const p = props.payload[0].payload as TrendPoint;
               return (
                 <div className="glass pointer-events-none rounded-lg px-2.5 py-1.5 text-[11px]">
-                  <div className="font-medium text-fg">{p.label}</div>
+                  <div className="font-medium text-fg">{p.tooltip ?? p.label}</div>
                   <div className="mt-0.5 tabular-nums">
                     <span className="text-base font-semibold tracking-tight">
                       {fmt(Math.round(p.value))}
@@ -95,7 +102,7 @@ export default function StatsTrendChart({
               );
             }}
           />
-          <Bar dataKey="value" fill="url(#barFill)" radius={[4, 4, 0, 0]} isAnimationActive={false} maxBarSize={42} />
+          <Bar dataKey="value" fill="url(#barFill)" radius={dense ? [1, 1, 0, 0] : [4, 4, 0, 0]} isAnimationActive={false} maxBarSize={42} />
         </BarChart>
       </ResponsiveContainer>
     </div>
