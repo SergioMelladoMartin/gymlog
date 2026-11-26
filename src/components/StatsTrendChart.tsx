@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { useLocale } from '../hooks/useLocale';
 import {
   Bar,
   BarChart,
@@ -39,11 +40,12 @@ export default function StatsTrendChart({
   unit?: string;
 }) {
   const colors = useMemo(readCssColors, []);
+  const { t, fmt } = useLocale();
 
   if (!data.length) {
     return (
       <div className="flex h-56 items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted">
-        Sin datos en este periodo.
+        {t('common.noData')}
       </div>
     );
   }
@@ -85,7 +87,7 @@ export default function StatsTrendChart({
                   <div className="font-medium text-fg">{p.label}</div>
                   <div className="mt-0.5 tabular-nums">
                     <span className="text-base font-semibold tracking-tight">
-                      {Math.round(p.value).toLocaleString('es-ES')}
+                      {fmt(Math.round(p.value))}
                     </span>
                     {unit && <span className="ml-0.5 text-[10px] text-muted">{unit}</span>}
                   </div>

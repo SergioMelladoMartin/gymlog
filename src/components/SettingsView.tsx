@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { signOut } from '../lib/auth';
 import {
-  discardConflictCopy, exportBytes, getConflictCopies, importBytes, resetLocal, restoreConflictCopy, wipeAll,
+  discardConflictCopy, exportBytes, flushNow, getConflictCopies, getSyncInfo, importBytes, resetLocal, restoreConflictCopy, wipeAll,
 } from '../lib/sqlite';
 import { useT } from '../hooks/useT';
 import type { ConflictCopy } from '../lib/localBackup';
@@ -98,6 +98,8 @@ export default function SettingsView() {
   }
 
   async function handleImport(file: File) {
+    // Importing replaces the whole database (here and on Drive).
+    if (!window.confirm(t('settings.importConfirm', { name: file.name }))) return;
     setImporting(true);
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
@@ -152,6 +154,12 @@ export default function SettingsView() {
   }
 
   async function logout() {
+    // Signing out wipes the local copy: push pending edits first, and warn
+    // if they still couldn't reach Drive.
+    try { await flushNow(); } catch {}
+    const { state } = getSyncInfo();
+    if ((state === 'dirty' || state === 'error' || state === 'syncing' || state === 'offline')
+      && !window.confirm(t('settings.logoutUnsynced'))) return;
     await signOut();
     await resetLocal();
     window.location.replace('/login');

@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
+import { navigate } from 'astro:transitions/client';
 import { createPortal } from 'react-dom';
 import { useDatabase } from '../hooks/useDatabase';
 import { useLocale } from '../hooks/useLocale';
 import { createExercise as qCreateExercise, getCategories, getExercises, type ExerciseExtra } from '../lib/queries';
 import type { Category } from '../lib/types';
+import CategoryForm from './CategoryForm';
 import ExerciseList from './ExerciseList';
 import { ExercisesSkeleton } from './Skeleton';
 
@@ -13,6 +15,7 @@ export default function ExercisesView() {
   const [exercises, setExercises] = useState<ExerciseExtra[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [creatorOpen, setCreatorOpen] = useState(false);
+  const [groupCreatorOpen, setGroupCreatorOpen] = useState(false);
 
   useEffect(() => {
     if (!ready) return;
@@ -22,6 +25,12 @@ export default function ExercisesView() {
 
   function refreshExercises() {
     setExercises(getExercises());
+  }
+
+  function refreshCategories() {
+    const cats = getCategories();
+    setCategories(cats);
+    return cats;
   }
 
   const url = typeof window !== 'undefined' ? new URL(window.location.href) : null;
@@ -88,6 +97,14 @@ export default function ExercisesView() {
                 </a>
               );
             })}
+            <button
+              type="button"
+              onClick={() => setGroupCreatorOpen(true)}
+              className="flex items-center justify-center gap-2 rounded-2xl border border-dashed border-border p-4 text-sm font-medium text-muted transition hover:border-strong hover:text-fg"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M12 5v14" /><path d="M5 12h14" /></svg>
+              {t('groups.new')}
+            </button>
           </div>
           <div className="mt-6">
             <a href="/exercises?q=_all" className="block rounded-xl border border-dashed border-border bg-card/50 p-3 text-center text-sm text-muted transition hover:bg-card hover:text-fg">
@@ -104,16 +121,30 @@ export default function ExercisesView() {
         />
       )}
 
+      {groupCreatorOpen && (
+        <Modal title={t('groups.new')} onClose={() => setGroupCreatorOpen(false)}>
+          <CategoryForm
+            onCancel={() => setGroupCreatorOpen(false)}
+            onCreated={(id) => {
+              refreshCategories();
+              setGroupCreatorOpen(false);
+              void navigate(`/exercises?group=${id}`);
+            }}
+          />
+        </Modal>
+      )}
+
       {creatorOpen && (
         <CreateExerciseModal
           categories={categories}
+          onCategoryCreated={refreshCategories}
           defaultCategoryId={groupId ?? categories[0]?.id ?? null}
           onClose={() => setCreatorOpen(false)}
           onCreated={(id) => {
             refreshExercises();
             setCreatorOpen(false);
             // Drop the user straight into the new exercise's detail page.
-            window.location.assign(`/exercise?id=${id}`);
+            void navigate(`/exercise?id=${id}`);
           }}
         />
       )}
@@ -121,13 +152,51 @@ export default function ExercisesView() {
   );
 }
 
+function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+  const { t } = useLocale();
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.body.style.overflow = '';
+    };
+  }, [onClose]);
+  if (!mounted) return null;
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[80] flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(6px)' }}
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+    >
+      <div onClick={(e) => e.stopPropagation()} className="glass-float w-full max-w-md rounded-2xl p-5">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-lg font-semibold tracking-tight">{title}</h2>
+          <button type="button" onClick={onClose} aria-label={t('action.close')} className="grid h-7 w-7 place-items-center rounded-md text-muted transition hover:bg-elevated hover:text-fg">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 function CreateExerciseModal({
   categories,
+  onCategoryCreated,
   defaultCategoryId,
   onClose,
   onCreated,
 }: {
   categories: Category[];
+  onCategoryCreated: () => Category[];
   defaultCategoryId: number | null;
   onClose: () => void;
   onCreated: (id: number) => void;
@@ -137,6 +206,7 @@ function CreateExerciseModal({
   const [categoryId, setCategoryId] = useState<number | null>(defaultCategoryId);
   const [submitting, setSubmitting] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [addingGroup, setAddingGroup] = useState(false);
 
   useEffect(() => {
     setMounted(true);
@@ -211,7 +281,28 @@ function CreateExerciseModal({
               </button>
             );
           })}
+          {!addingGroup && (
+            <button
+              type="button"
+              onClick={() => setAddingGroup(true)}
+              className="rounded-full border border-dashed border-border px-3 py-1.5 text-xs font-medium text-muted transition hover:text-fg"
+            >
+              + {t('groups.newShort')}
+            </button>
+          )}
         </div>
+        {addingGroup && (
+          <div className="mt-3 rounded-xl border border-border bg-elevated/40 p-3">
+            <CategoryForm
+              onCancel={() => setAddingGroup(false)}
+              onCreated={(id) => {
+                onCategoryCreated();
+                setCategoryId(id);
+                setAddingGroup(false);
+              }}
+            />
+          </div>
+        )}
         <div className="mt-5 flex gap-2">
           <button
             type="button"

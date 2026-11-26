@@ -89,15 +89,18 @@ export default function ExerciseDetailView() {
     return <GenericSkeleton />;
   }
 
-  const totalSets = history.length;
+  // `history` is capped (LIMIT 200) for the list below; totals come from
+  // the per-session aggregates, which cover every session.
+  const totalSets = sessions.reduce((a, s) => a + (s.set_count ?? 0), 0);
   const totalSessions = sessions.length;
   const best1RM = sessions.reduce((a, s) => Math.max(a, s.est_1rm ?? 0), 0);
   const heaviest = sessions.reduce((a, s) => Math.max(a, s.top_weight ?? 0), 0);
 
-  let bestSet = history[0];
-  for (const s of history) {
-    if (!bestSet || s.weight_kg > bestSet.weight_kg || (s.weight_kg === bestSet.weight_kg && s.reps > bestSet.reps)) {
-      bestSet = s;
+  let bestSet: { weight_kg: number; reps: number } | undefined;
+  for (const s of sessions) {
+    const w = s.top_set_weight ?? 0; const r = s.top_set_reps ?? 0;
+    if (!bestSet || w > bestSet.weight_kg || (w === bestSet.weight_kg && r > bestSet.reps)) {
+      bestSet = { weight_kg: w, reps: r };
     }
   }
 

@@ -8,7 +8,7 @@ import { ChartSkeleton, StatsSkeleton } from './Skeleton';
 const StatsTrendChart = lazy(() => import('./StatsTrendChart'));
 
 type Range = 'all' | '7d' | '30d' | '90d' | '365d' | 'year';
-type GroupBy = 'week' | 'month';
+type GroupBy = 'week' | 'month' | 'year';
 type TrendMetric = 'workouts' | 'volume' | 'sets' | 'reps';
 
 interface TrendRow { period: string; days: number; sets: number; reps: number; volume: number }
@@ -17,6 +17,44 @@ function argbToHex(n: number | null): string | null {
   if (n == null) return null;
   const u = n >>> 0;
   return '#' + [(u >> 16) & 0xff, (u >> 8) & 0xff, u & 0xff].map((v) => v.toString(16).padStart(2, '0')).join('');
+}
+
+// ─── Trend period helpers (UTC math on YYYY-MM-DD strings, DST-safe) ───
+function isoToUtc(iso: string): number {
+  const [y, m, d] = iso.split('-').map(Number);
+  return Date.UTC(y, m - 1, d);
+}
+function utcToIso(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 10);
+}
+function mondayOf(iso: string): string {
+  const ms = isoToUtc(iso);
+  const dow = (new Date(ms).getUTCDay() + 6) % 7; // 0 = Monday
+  return utcToIso(ms - dow * 86400000);
+}
+function todayIso(): string {
+  const n = new Date();
+  return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`;
+}
+/** Every period key (same format SQL produces) from the first logged date
+ *  up to the current period, so weeks/months without training show as 0. */
+function allPeriods(groupBy: GroupBy, firstIso: string): string[] {
+  const out: string[] = [];
+  const today = todayIso();
+  if (groupBy === 'week') {
+    const end = isoToUtc(mondayOf(today));
+    for (let ms = isoToUtc(mondayOf(firstIso)); ms <= end; ms += 7 * 86400000) out.push(utcToIso(ms));
+  } else if (groupBy === 'month') {
+    let y = Number(firstIso.slice(0, 4)); let m = Number(firstIso.slice(5, 7));
+    const ey = Number(today.slice(0, 4)); const em = Number(today.slice(5, 7));
+    while (y < ey || (y === ey && m <= em)) {
+      out.push(`${y}-${String(m).padStart(2, '0')}`);
+      if (++m > 12) { m = 1; y++; }
+    }
+  } else {
+    for (let y = Number(firstIso.slice(0, 4)); y <= Number(today.slice(0, 4)); y++) out.push(String(y));
+  }
+  return out;
 }
 
 function rangeLabel(range: Range, year: number, t: (k: string, v?: Record<string, string | number>) => string): string {
@@ -47,7 +85,9 @@ export default function StatsView() {
   const [groupBy, setGroupBy] = useState<GroupBy>('week');
   const [trendMetric, setTrendMetric] = useState<TrendMetric>('workouts');
   const [trend, setTrend] = useState<TrendRow[]>([]);
-  const trendLimit = groupBy === 'week' ? 54 : 12;
+  // How many windows back in time the trend chart is showing (0 = latest).
+  const [trendPage, setTrendPage] = useState(0);
+  const trendLimit = groupBy === 'week' ? 52 : groupBy === 'month' ? 12 : Infinity;
 
   const trendMetrics = useMemo(() => ([
     { id: 'workouts' as const, label: t('stats.metricWorkouts'), field: 'days' as const, unit: undefined },
@@ -134,28 +174,40 @@ export default function StatsView() {
 
     const periodExpr = groupBy === 'week'
       ? "date(date, '-' || ((strftime('%w', date) + 6) % 7) || ' days')"
-      : "strftime('%Y-%m', date)";
+      : groupBy === 'month'
+        ? "strftime('%Y-%m', date)"
+        : "strftime('%Y', date)";
     const rowsT = q(
       `SELECT ${periodExpr} AS period,
+              MIN(date)            AS first_date,
               COUNT(DISTINCT date) AS days,
               COUNT(*)             AS sets,
               SUM(reps)            AS reps,
               SUM(metric_weight * reps) AS volume
        FROM training_log
+       WHERE date IS NOT NULL AND date <> ''
        GROUP BY period
-       ORDER BY period DESC
-       LIMIT ${trendLimit}`,
+       ORDER BY period`,
     );
+    if (!rowsT.length) { setTrend([]); return; }
+    const byPeriod = new Map<string, any>(rowsT.map((r: any) => [String(r.period), r]));
+    const first = String(rowsT[0].first_date).slice(0, 10);
     setTrend(
-      rowsT.reverse().map((r: any) => ({
-        period: String(r.period),
-        days: Number(r.days ?? 0),
-        sets: Number(r.sets ?? 0),
-        reps: Number(r.reps ?? 0),
-        volume: Number(r.volume ?? 0),
-      })),
+      allPeriods(groupBy, first).map((period) => {
+        const r = byPeriod.get(period);
+        return {
+          period,
+          days: Number(r?.days ?? 0),
+          sets: Number(r?.sets ?? 0),
+          reps: Number(r?.reps ?? 0),
+          volume: Number(r?.volume ?? 0),
+        };
+      }),
     );
-  }, [ready, revision, groupBy, trendLimit]);
+  }, [ready, revision, groupBy]);
+
+  // Reset to the latest window whenever the grouping changes.
+  useEffect(() => { setTrendPage(0); }, [groupBy]);
 
   if (!ready) return <StatsSkeleton />;
 
@@ -173,12 +225,26 @@ export default function StatsView() {
   ];
 
   const activeTrend = trendMetrics.find((m) => m.id === trendMetric)!;
-  const trendData = trend.map((r) => ({
-    label: groupBy === 'week'
-      ? fmtDate(r.period, { day: 'numeric', month: 'short' })
-      : fmtDate(r.period + '-01', { month: 'short', year: '2-digit' }),
+  const pageCount = Number.isFinite(trendLimit) ? Math.max(1, Math.ceil(trend.length / trendLimit)) : 1;
+  const page = Math.min(trendPage, pageCount - 1);
+  const windowEnd = Number.isFinite(trendLimit) ? trend.length - page * trendLimit : trend.length;
+  const windowStart = Number.isFinite(trendLimit) ? Math.max(0, windowEnd - trendLimit) : 0;
+  const visibleTrend = trend.slice(windowStart, windowEnd);
+  const periodLabel = (p: string, long = false) =>
+    groupBy === 'week'
+      ? fmtDate(p, long ? { day: 'numeric', month: 'short', year: '2-digit' } : { day: 'numeric', month: 'short' })
+      : groupBy === 'month'
+        ? fmtDate(p + '-01', { month: 'short', year: '2-digit' })
+        : p;
+  const trendData = visibleTrend.map((r) => ({
+    label: periodLabel(r.period),
     value: Number(r[activeTrend.field]),
   }));
+  const windowLabel = visibleTrend.length
+    ? `${periodLabel(visibleTrend[0].period, true)} – ${periodLabel(visibleTrend[visibleTrend.length - 1].period, true)}`
+    : '';
+  const canOlder = windowStart > 0;
+  const canNewer = page > 0;
 
   const weekdayLong = weekdaysLong();
   const weekdayShort = weekdaysNarrow();
@@ -199,22 +265,16 @@ export default function StatsView() {
 
       <div className="card mb-6 p-4">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <div className="section-title">
-            {t('stats.evolution', {
-              period: groupBy === 'week'
-                ? t('stats.weeks', { n: trendLimit })
-                : t('stats.months', { n: trendLimit }),
-            })}
-          </div>
+          <div className="section-title">{t('stats.evolutionTitle')}</div>
           <div className="flex gap-1 rounded-full border border-border bg-card p-0.5 text-[11px] font-medium">
-            {(['week', 'month'] as const).map((g) => (
+            {(['week', 'month', 'year'] as const).map((g) => (
               <button
                 key={g}
                 type="button"
                 onClick={() => setGroupBy(g)}
                 className={`rounded-full px-3 py-1 transition ${groupBy === g ? 'btn-accent' : 'text-muted hover:text-fg'}`}
               >
-                {g === 'week' ? t('stats.week') : t('stats.month')}
+                {g === 'week' ? t('stats.week') : g === 'month' ? t('stats.month') : t('stats.year')}
               </button>
             ))}
           </div>
@@ -236,6 +296,38 @@ export default function StatsView() {
         <Suspense fallback={<ChartSkeleton />}>
           <StatsTrendChart data={trendData} unit={activeTrend.unit} />
         </Suspense>
+
+        {pageCount > 1 && (
+          <div className="mt-2 flex items-center justify-between gap-2 text-xs">
+            <button
+              type="button"
+              onClick={() => setTrendPage(page + 1)}
+              disabled={!canOlder}
+              aria-label={t('stats.older')}
+              className="grid h-8 w-8 place-items-center rounded-full border border-border bg-elevated/50 text-muted transition hover:bg-elevated hover:text-fg disabled:opacity-30"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
+            </button>
+            <button
+              type="button"
+              onClick={() => setTrendPage(0)}
+              disabled={!canNewer}
+              className="min-w-0 truncate rounded-full px-2 py-1 tabular-nums text-muted transition enabled:hover:text-fg"
+              title={canNewer ? t('stats.backToLatest') : undefined}
+            >
+              {windowLabel}
+            </button>
+            <button
+              type="button"
+              onClick={() => setTrendPage(page - 1)}
+              disabled={!canNewer}
+              aria-label={t('stats.newer')}
+              className="grid h-8 w-8 place-items-center rounded-full border border-border bg-elevated/50 text-muted transition hover:bg-elevated hover:text-fg disabled:opacity-30"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="mb-2 flex items-baseline justify-between gap-2">

@@ -42,6 +42,35 @@ export function getCategories(): Category[] {
   }));
 }
 
+/** Palette offered when creating a muscle group (hex, no alpha). */
+export const CATEGORY_COLORS = [
+  '#e5484d', '#f76b15', '#ffc53d', '#a3e635', '#30a46c', '#12a594',
+  '#00a2c7', '#3e63dd', '#8e4ec6', '#d6409f', '#ad7f58', '#8b8d98',
+];
+
+/** Hex "#rrggbb" → FitNotes-style signed 32-bit ARGB (opaque). */
+function hexToArgb(hex: string): number {
+  const rgb = parseInt(hex.replace('#', '').slice(0, 6), 16) || 0;
+  return (0xff000000 | rgb) | 0;
+}
+
+/** Creates a new muscle group (FitNotes `Category` row). Returns its id.
+ *  Throws if a group with the same name (case-insensitive) already exists. */
+export function createCategory(name: string, colorHex: string): number {
+  const db = getDb();
+  const trimmed = name.trim();
+  const dup = db.selectValue('SELECT _id FROM Category WHERE lower(name) = lower(?)', [trimmed]);
+  if (dup != null) throw new Error('DUPLICATE_CATEGORY');
+  const nextSort = Number(db.selectValue('SELECT COALESCE(MAX(sort_order), 0) + 1 FROM Category') ?? 1);
+  db.exec({
+    sql: 'INSERT INTO Category (name, colour, sort_order) VALUES (?, ?, ?)',
+    bind: [trimmed, hexToArgb(colorHex), nextSort],
+  });
+  const id = Number(db.selectValue('SELECT last_insert_rowid()'));
+  markDirty();
+  return id;
+}
+
 // ─── Exercises ────────────────────────────────────────────────────────
 
 export interface ExerciseExtra extends Exercise {

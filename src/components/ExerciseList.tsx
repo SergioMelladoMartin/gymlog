@@ -134,7 +134,8 @@ export default function ExerciseList({ exercises, categories, initialCategory = 
 
 function formatDate(iso: string | null) {
   if (!iso) return '—';
-  const diff = Math.round((Date.now() - new Date(iso).getTime()) / 86_400_000);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const diff = Math.round((today.getTime() - new Date(iso.slice(0, 10) + 'T00:00:00').getTime()) / 86_400_000);
   if (diff === 0) return 'hoy';
   if (diff === 1) return 'ayer';
   if (diff < 30) return `hace ${diff}d`;

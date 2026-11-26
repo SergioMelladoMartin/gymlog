@@ -93,11 +93,16 @@ export default function WorkoutLogger({ date, exercises: initialExercises, categ
 
   useEffect(() => {
     if (!commentDirty) return;
-    const t = setTimeout(() => {
+    let saved = false;
+    const save = () => {
+      if (saved) return;
+      saved = true;
       try { qSetComment(date, comment); } catch (e) { console.error(e); }
-      setCommentDirty(false);
-    }, 600);
-    return () => clearTimeout(t);
+    };
+    const t = setTimeout(() => { save(); setCommentDirty(false); }, 600);
+    // Leaving the day (nav link, prev/next arrows, unmount) before the
+    // debounce fires must not drop the note: save it on cleanup too.
+    return () => { clearTimeout(t); save(); };
   }, [comment, commentDirty, date]);
 
   function refreshSets() {
@@ -1277,7 +1282,9 @@ function formatDistance(meters: number): string {
 }
 
 function relativeDate(iso: string) {
-  const diffDays = Math.round((Date.now() - new Date(iso).getTime()) / 86_400_000);
+  // Compare local calendar days ('YYYY-MM-DD' alone parses as UTC midnight).
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const diffDays = Math.round((today.getTime() - new Date(iso.slice(0, 10) + 'T00:00:00').getTime()) / 86_400_000);
   if (diffDays === 0) return 'hoy';
   if (diffDays === 1) return 'ayer';
   if (diffDays < 7) return `hace ${diffDays}d`;

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { navigate } from 'astro:transitions/client';
 import type { Category } from '../lib/types';
 import { countExerciseSets, deleteExercise, updateExercise } from '../lib/queries';
 
@@ -35,7 +36,7 @@ export default function ExerciseHeaderEditor({
     setDeleting(true);
     try {
       deleteExercise(exerciseId);
-      window.location.assign('/exercises');
+      void navigate('/exercises');
     } catch (err: any) {
       alert(err?.message ?? 'Error al borrar');
       setDeleting(false);
